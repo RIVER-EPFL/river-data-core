@@ -5,12 +5,10 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter
 use uuid::Uuid;
 
 use super::{SyncError, SyncResult};
-use crate::models::{EnrollRequest, EnrollResponse};
+use crate::models::{EnrollRequest, EnrollResponse, ServiceStatus};
 use crate::server::entity::{sync_service_credentials, sync_service_tokens, sync_services};
 use crate::server::handlers::heartbeat::SESSION_TOKEN_CACHE;
 use crate::server::state::SyncState;
-
-const SESSION_TOKEN_TTL_MINUTES: i64 = 15;
 
 pub(crate) async fn create_session_token<S: SyncState>(
     state: &S,
@@ -18,12 +16,13 @@ pub(crate) async fn create_session_token<S: SyncState>(
 ) -> SyncResult<String> {
     let raw_token = state.generate_token();
     let token_hash = state.hash_token(&raw_token);
+    let ttl_secs = state.sync_config().session_token_ttl_secs as i64;
 
     let token = sync_service_tokens::ActiveModel {
         id: Set(Uuid::new_v4()),
         service_id: Set(service_id),
         token_hash: Set(token_hash.clone()),
-        expires_at: Set((Utc::now() + chrono::Duration::minutes(SESSION_TOKEN_TTL_MINUTES)).into()),
+        expires_at: Set((Utc::now() + chrono::Duration::seconds(ttl_secs)).into()),
         created_at: Set(Utc::now().into()),
     };
     token.insert(state.db()).await?;
@@ -73,9 +72,11 @@ pub async fn enroll<S: SyncState>(
         .one(state.db())
         .await?;
 
+    let starting = ServiceStatus::Starting.to_string();
+
     let service_id = if let Some(existing) = existing {
         let mut active: sync_services::ActiveModel = existing.clone().into();
-        active.status = Set("starting".to_string());
+        active.status = Set(starting);
         active.current_operation = Set(None);
         active.last_error = Set(None);
         active.updated_at = Set(Utc::now().into());
@@ -86,7 +87,7 @@ pub async fn enroll<S: SyncState>(
             id: Set(Uuid::new_v4()),
             service_type: Set(cred.service_type.clone()),
             instance_id: Set(req.instance_id.clone()),
-            status: Set("starting".to_string()),
+            status: Set(starting),
             current_operation: Set(None),
             last_heartbeat: Set(None),
             last_sync_completed_at: Set(None),

@@ -8,7 +8,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use super::{SyncError, SyncResult};
-use crate::models::{HeartbeatRequest, HeartbeatResponse, PendingCommand};
+use crate::models::{CommandStatus, HeartbeatRequest, HeartbeatResponse, PendingCommand, ServiceStatus};
 use crate::server::entity::{sync_commands, sync_services};
 use crate::server::handlers::enroll::create_session_token;
 use crate::server::middleware::SyncServiceContext;
@@ -26,14 +26,12 @@ pub async fn heartbeat<S: SyncState>(
     _ctx: SyncServiceContext,
     Json(req): Json<HeartbeatRequest>,
 ) -> SyncResult<Json<HeartbeatResponse>> {
-    const VALID_STATUSES: &[&str] = &[
-        "starting", "idle", "running", "paused", "syncing", "error", "stopping",
-    ];
-    if !VALID_STATUSES.contains(&req.status.as_str()) {
+    if ServiceStatus::from_str(&req.status).is_none() {
+        let valid: Vec<&str> = ServiceStatus::ALL.iter().map(|s| s.as_str()).collect();
         return Err(SyncError::BadRequest(format!(
             "Invalid status '{}'. Valid: {}",
             req.status,
-            VALID_STATUSES.join(", ")
+            valid.join(", ")
         )));
     }
 
@@ -63,7 +61,7 @@ pub async fn heartbeat<S: SyncState>(
         .filter(
             Condition::all()
                 .add(sync_commands::Column::ServiceId.eq(req.service_id))
-                .add(sync_commands::Column::Status.eq("pending"))
+                .add(sync_commands::Column::Status.eq(CommandStatus::Pending.as_str()))
                 .add(sync_commands::Column::ExpiresAt.gt(Utc::now())),
         )
         .all(state.db())

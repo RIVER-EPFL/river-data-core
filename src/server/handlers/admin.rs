@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{SyncError, SyncResult};
+use crate::commands;
+use crate::models::CommandStatus;
 use crate::server::entity::{
     sync_commands, sync_events, sync_service_credentials, sync_service_tokens, sync_services,
 };
@@ -33,14 +35,15 @@ pub struct SyncServiceResponse {
 
 fn compute_health(
     last_heartbeat: Option<chrono::DateTime<chrono::FixedOffset>>,
+    config: &crate::models::SyncServerConfig,
 ) -> String {
     match last_heartbeat {
         None => "unknown".to_string(),
         Some(hb) => {
             let age = Utc::now() - hb.with_timezone(&Utc);
-            if age.num_seconds() < 90 {
+            if age.num_seconds() < config.health_healthy_secs {
                 "healthy".to_string()
-            } else if age.num_seconds() < 300 {
+            } else if age.num_seconds() < config.health_warning_secs {
                 "warning".to_string()
             } else {
                 "stale".to_string()
@@ -49,8 +52,8 @@ fn compute_health(
     }
 }
 
-fn service_to_response(s: sync_services::Model) -> SyncServiceResponse {
-    let health = compute_health(s.last_heartbeat);
+fn service_to_response(s: sync_services::Model, config: &crate::models::SyncServerConfig) -> SyncServiceResponse {
+    let health = compute_health(s.last_heartbeat, config);
     SyncServiceResponse {
         id: s.id,
         service_type: s.service_type,
@@ -182,7 +185,8 @@ pub async fn list_services<S: SyncState>(
         .all(state.db())
         .await?;
 
-    Ok(Json(services.into_iter().map(service_to_response).collect()))
+    let config = state.sync_config();
+    Ok(Json(services.into_iter().map(|s| service_to_response(s, config)).collect()))
 }
 
 pub async fn get_service<S: SyncState>(
@@ -194,7 +198,7 @@ pub async fn get_service<S: SyncState>(
         .await?
         .ok_or_else(|| SyncError::NotFound("Service not found".to_string()))?;
 
-    Ok(Json(service_to_response(service)))
+    Ok(Json(service_to_response(service, state.sync_config())))
 }
 
 pub async fn issue_command<S: SyncState>(
@@ -207,7 +211,12 @@ pub async fn issue_command<S: SyncState>(
         .await?
         .ok_or_else(|| SyncError::NotFound("Service not found".to_string()))?;
 
-    let valid_commands = ["trigger_sync", "trigger_full_sync", "pause", "resume"];
+    let valid_commands = [
+        commands::TRIGGER_SYNC,
+        commands::TRIGGER_FULL_SYNC,
+        commands::PAUSE,
+        commands::RESUME,
+    ];
     if !valid_commands.contains(&req.command.as_str()) {
         return Err(SyncError::BadRequest(format!(
             "Invalid command '{}'. Valid commands: {}",
@@ -216,15 +225,16 @@ pub async fn issue_command<S: SyncState>(
         )));
     }
 
+    let expiry_secs = state.sync_config().command_expiry_secs as i64;
     let cmd = sync_commands::ActiveModel {
         id: Set(Uuid::new_v4()),
         service_id: Set(service_id),
         command: Set(req.command),
         payload: Set(req.payload),
-        status: Set("pending".to_string()),
+        status: Set(CommandStatus::Pending.to_string()),
         result: Set(None),
         created_at: Set(Utc::now().into()),
-        expires_at: Set((Utc::now() + chrono::Duration::minutes(5)).into()),
+        expires_at: Set((Utc::now() + chrono::Duration::seconds(expiry_secs)).into()),
         acknowledged_at: Set(None),
         completed_at: Set(None),
     };
@@ -274,7 +284,8 @@ pub async fn create_credential<S: SyncState>(
     Json(req): Json<CreateCredentialRequest>,
 ) -> SyncResult<Json<CreateCredentialResponse>> {
     let full_token = state.generate_token();
-    let client_id = format!("svc_{}", &full_token[..16]);
+    let prefix = &state.sync_config().client_id_prefix;
+    let client_id = format!("{prefix}{}", &full_token[..16]);
     let client_secret = state.generate_token();
     let secret_hash = state.hash_token(&client_secret);
 

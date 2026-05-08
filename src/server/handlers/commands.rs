@@ -5,10 +5,16 @@ use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use uuid::Uuid;
 
 use super::{SyncError, SyncResult};
-use crate::models::CommandUpdateRequest;
+use crate::models::{CommandStatus, CommandUpdateRequest};
 use crate::server::entity::sync_commands;
 use crate::server::middleware::SyncServiceContext;
 use crate::server::state::SyncState;
+
+const VALID_UPDATE_STATUSES: &[&str] = &[
+    CommandStatus::Acknowledged.as_str(),
+    CommandStatus::Completed.as_str(),
+    CommandStatus::Failed.as_str(),
+];
 
 pub async fn update_command<S: SyncState>(
     State(state): State<S>,
@@ -27,12 +33,11 @@ pub async fn update_command<S: SyncState>(
         ));
     }
 
-    let valid_statuses = ["acknowledged", "completed", "failed"];
-    if !valid_statuses.contains(&req.status.as_str()) {
+    if !VALID_UPDATE_STATUSES.contains(&req.status.as_str()) {
         return Err(SyncError::BadRequest(format!(
             "Invalid status '{}'. Valid: {}",
             req.status,
-            valid_statuses.join(", ")
+            VALID_UPDATE_STATUSES.join(", ")
         )));
     }
 
@@ -41,10 +46,12 @@ pub async fn update_command<S: SyncState>(
     if req.result.is_some() {
         active.result = Set(req.result);
     }
-    if req.status == "acknowledged" {
+    if req.status == CommandStatus::Acknowledged.as_str() {
         active.acknowledged_at = Set(Some(Utc::now().into()));
     }
-    if req.status == "completed" || req.status == "failed" {
+    if req.status == CommandStatus::Completed.as_str()
+        || req.status == CommandStatus::Failed.as_str()
+    {
         active.completed_at = Set(Some(Utc::now().into()));
     }
     active.update(state.db()).await?;

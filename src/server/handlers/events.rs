@@ -6,6 +6,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{SyncError, SyncResult};
+use crate::models::{SyncEventStatus, SyncEventType};
 use crate::server::entity::{sync_events, sync_services};
 use crate::server::middleware::SyncServiceContext;
 use crate::server::state::SyncState;
@@ -39,35 +40,34 @@ pub async fn create_sync_event<S: SyncState>(
         ));
     }
 
-    const VALID_EVENT_TYPES: &[&str] =
-        &["scheduled", "manual", "command", "triggered", "full_sync"];
-    const VALID_EVENT_STATUSES: &[&str] =
-        &["running", "completed", "partial", "failed", "cancelled"];
-
     if let Some(ref event_type) = req.event_type
-        && !VALID_EVENT_TYPES.contains(&event_type.as_str()) {
-            return Err(SyncError::BadRequest(format!(
-                "Invalid event_type '{}'. Valid: {}",
-                event_type,
-                VALID_EVENT_TYPES.join(", ")
-            )));
-        }
+        && SyncEventType::from_str(event_type).is_none()
+    {
+        let valid: Vec<&str> = SyncEventType::ALL.iter().map(|v| v.as_str()).collect();
+        return Err(SyncError::BadRequest(format!(
+            "Invalid event_type '{}'. Valid: {}",
+            event_type,
+            valid.join(", ")
+        )));
+    }
 
     if let Some(ref status) = req.status
-        && !VALID_EVENT_STATUSES.contains(&status.as_str()) {
-            return Err(SyncError::BadRequest(format!(
-                "Invalid status '{}'. Valid: {}",
-                status,
-                VALID_EVENT_STATUSES.join(", ")
-            )));
-        }
+        && SyncEventStatus::from_str(status).is_none()
+    {
+        let valid: Vec<&str> = SyncEventStatus::ALL.iter().map(|v| v.as_str()).collect();
+        return Err(SyncError::BadRequest(format!(
+            "Invalid status '{}'. Valid: {}",
+            status,
+            valid.join(", ")
+        )));
+    }
 
     let event = sync_events::ActiveModel {
         id: Set(Uuid::new_v4()),
         service_id: Set(req.service_id),
         command_id: Set(req.command_id),
-        event_type: Set(req.event_type.unwrap_or_else(|| "scheduled".to_string())),
-        status: Set(req.status.unwrap_or_else(|| "running".to_string())),
+        event_type: Set(req.event_type.unwrap_or_else(|| SyncEventType::Scheduled.as_str().to_string())),
+        status: Set(req.status.unwrap_or_else(|| SyncEventStatus::Running.as_str().to_string())),
         readings_synced: Set(0),
         status_events_synced: Set(0),
         errors: Set(None),
@@ -106,11 +106,9 @@ pub async fn update_sync_event<S: SyncState>(
     let service_id = event.service_id;
     let mut active: sync_events::ActiveModel = event.into();
 
-    let is_terminal = matches!(
-        req.status.as_deref(),
-        Some("completed" | "partial" | "failed" | "cancelled")
-    );
-    let is_success = matches!(req.status.as_deref(), Some("completed" | "partial"));
+    let parsed_status = req.status.as_deref().and_then(SyncEventStatus::from_str);
+    let is_terminal = parsed_status.is_some_and(|s| s.is_terminal());
+    let is_success = parsed_status.is_some_and(|s| s.is_success());
 
     if let Some(status) = req.status {
         active.status = Set(status);
@@ -140,12 +138,12 @@ pub async fn update_sync_event<S: SyncState>(
         && let Some(service) = sync_services::Entity::find_by_id(service_id)
             .one(state.db())
             .await?
-        {
-            let mut svc_active: sync_services::ActiveModel = service.into();
-            svc_active.last_sync_completed_at = Set(Some(Utc::now().into()));
-            svc_active.updated_at = Set(Utc::now().into());
-            svc_active.update(state.db()).await?;
-        }
+    {
+        let mut svc_active: sync_services::ActiveModel = service.into();
+        svc_active.last_sync_completed_at = Set(Some(Utc::now().into()));
+        svc_active.updated_at = Set(Utc::now().into());
+        svc_active.update(state.db()).await?;
+    }
 
     Ok(Json(serde_json::json!({"updated": true})))
 }

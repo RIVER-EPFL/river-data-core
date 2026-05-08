@@ -8,7 +8,7 @@ use crate::client::control_plane::ControlPlaneClient;
 use crate::client::river_data_client::RiverDataClient;
 use crate::commands;
 use crate::error::ControlPlaneError;
-use crate::models::{PendingCommand, RunnerConfig, SyncResult, SyncTrigger};
+use crate::models::{PendingCommand, RunnerConfig, ServiceStatus, SyncEventType, SyncEventStatus, SyncResult, SyncTrigger};
 
 #[async_trait::async_trait]
 pub trait SyncService: Send + Sync + 'static {
@@ -152,11 +152,11 @@ impl<S: SyncService> SyncServiceRunner<S> {
             let current_op = current_op_rx.borrow().clone();
 
             let status = if is_paused {
-                "paused"
+                ServiceStatus::Paused.as_str()
             } else if current_op.is_some() {
-                "syncing"
+                ServiceStatus::Syncing.as_str()
             } else {
-                "idle"
+                ServiceStatus::Idle.as_str()
             };
 
             match client
@@ -301,9 +301,9 @@ impl<S: SyncService> SyncServiceRunner<S> {
             let start = Instant::now();
 
             let event_type = match &trigger {
-                SyncTrigger::Command { full: true, .. } => "full_sync",
-                SyncTrigger::Command { full: false, .. } => "triggered",
-                SyncTrigger::Scheduled => "scheduled",
+                SyncTrigger::Command { full: true, .. } => SyncEventType::FullSync.as_str(),
+                SyncTrigger::Command { full: false, .. } => SyncEventType::Triggered.as_str(),
+                SyncTrigger::Scheduled => SyncEventType::Scheduled.as_str(),
             };
 
             let op_label = if full { "Full Sync" } else { "Syncing" };
@@ -315,7 +315,7 @@ impl<S: SyncService> SyncServiceRunner<S> {
                         "service_id": service_id,
                         "command_id": command_id,
                         "event_type": event_type,
-                        "status": "running",
+                        "status": SyncEventStatus::Running.as_str(),
                     }))
                     .await
                 {
@@ -340,9 +340,9 @@ impl<S: SyncService> SyncServiceRunner<S> {
                 match &result {
                     Ok(r) => {
                         let status = if r.errors.is_empty() {
-                            "completed"
+                            SyncEventStatus::Completed.as_str()
                         } else {
-                            "partial"
+                            SyncEventStatus::Partial.as_str()
                         };
                         let _ = api
                             .update_sync_event(
@@ -364,7 +364,7 @@ impl<S: SyncService> SyncServiceRunner<S> {
                             .update_sync_event(
                                 eid,
                                 &serde_json::json!({
-                                    "status": "failed",
+                                    "status": SyncEventStatus::Failed.as_str(),
                                     "errors": [e.to_string()],
                                     "duration_ms": duration_ms,
                                 }),
