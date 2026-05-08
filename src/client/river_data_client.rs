@@ -8,18 +8,29 @@ use crate::models::{DataStream, IngestReading, IngestStatusEvent, RegisterStream
 pub struct RiverDataClient {
     http_client: Client,
     base_url: String,
+    path_prefix: String,
     token: std::sync::RwLock<String>,
 }
 
 impl RiverDataClient {
     pub fn new(base_url: &str, token: &str) -> Result<Self, reqwest::Error> {
+        Self::with_config(base_url, token, "/api/service", 60)
+    }
+
+    pub fn with_config(
+        base_url: &str,
+        token: &str,
+        path_prefix: &str,
+        timeout_secs: u64,
+    ) -> Result<Self, reqwest::Error> {
         let http_client = Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(timeout_secs))
             .build()?;
 
         Ok(Self {
             http_client,
             base_url: base_url.trim_end_matches('/').to_string(),
+            path_prefix: path_prefix.to_string(),
             token: std::sync::RwLock::new(token.to_string()),
         })
     }
@@ -35,7 +46,7 @@ impl RiverDataClient {
     }
 
     fn url(&self, path: &str) -> String {
-        format!("{}/api/service{}", self.base_url, path)
+        format!("{}{}{}", self.base_url, self.path_prefix, path)
     }
 
     // ========================================================================

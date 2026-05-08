@@ -256,6 +256,7 @@ pub struct RunnerConfig {
     pub instance_id: String,
     pub heartbeat_interval_secs: u64,
     pub sync_interval_secs: u64,
+    pub enrollment_retry_secs: u64,
 }
 
 impl RunnerConfig {
@@ -267,6 +268,7 @@ impl RunnerConfig {
             instance_id: std::env::var("INSTANCE_ID").unwrap_or_else(|_| "default".to_string()),
             heartbeat_interval_secs: env_u64("HEARTBEAT_INTERVAL_SECONDS", 30),
             sync_interval_secs: env_u64("SYNC_INTERVAL_SECONDS", 300),
+            enrollment_retry_secs: env_u64("ENROLLMENT_RETRY_SECONDS", 10),
         })
     }
 }

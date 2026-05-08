@@ -10,18 +10,28 @@ use crate::models::{
 pub struct ControlPlaneClient {
     http: Client,
     base_url: String,
+    path_prefix: String,
     session_token: Option<String>,
 }
 
 impl ControlPlaneClient {
     pub fn new(base_url: &str) -> Result<Self, reqwest::Error> {
+        Self::with_config(base_url, "/api/service/sync", 30)
+    }
+
+    pub fn with_config(
+        base_url: &str,
+        path_prefix: &str,
+        timeout_secs: u64,
+    ) -> Result<Self, reqwest::Error> {
         let http = Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(timeout_secs))
             .build()?;
 
         Ok(Self {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
+            path_prefix: path_prefix.to_string(),
             session_token: None,
         })
     }
@@ -35,7 +45,7 @@ impl ControlPlaneClient {
     }
 
     fn service_url(&self, path: &str) -> String {
-        format!("{}/api/service/sync{}", self.base_url, path)
+        format!("{}{}{}", self.base_url, self.path_prefix, path)
     }
 
     pub async fn enroll(

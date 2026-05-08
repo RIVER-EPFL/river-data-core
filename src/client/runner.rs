@@ -64,12 +64,12 @@ impl<S: SyncService> SyncServiceRunner<S> {
             {
                 Ok(resp) => break resp,
                 Err(ControlPlaneError::CredentialsRevoked) => {
-                    tracing::warn!("Credentials not found or invalid, retrying in 10s");
-                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    tracing::warn!(retry_secs = self.config.enrollment_retry_secs, "Credentials not found or invalid, retrying");
+                    tokio::time::sleep(Duration::from_secs(self.config.enrollment_retry_secs)).await;
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "Enrollment failed, retrying in 10s");
-                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    tracing::warn!(error = %e, retry_secs = self.config.enrollment_retry_secs, "Enrollment failed, retrying");
+                    tokio::time::sleep(Duration::from_secs(self.config.enrollment_retry_secs)).await;
                 }
             }
         };
