@@ -2,8 +2,8 @@
 name = "river-data-core"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.93"
-description = "Core sync control plane library for River Data services"
+rust-version = "1.95"
+description = "Common types & traits for the in the river-data platform"
 license = "MIT"
 repository = "https://github.com/RIVER-EPFL/river-data-core"
 keywords = ["sync", "control-plane", "axum", "sea-orm"]
