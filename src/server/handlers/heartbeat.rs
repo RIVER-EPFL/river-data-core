@@ -11,6 +11,7 @@ use uuid::Uuid;
 use super::{SyncError, SyncResult};
 use crate::server::entity::{sync_commands, sync_services};
 use crate::server::handlers::enroll::create_session_token;
+use crate::server::middleware::SyncServiceContext;
 use crate::server::state::SyncState;
 
 pub(crate) static SESSION_TOKEN_CACHE: LazyLock<Cache<Uuid, String>> = LazyLock::new(|| {
@@ -42,6 +43,7 @@ pub struct PendingCommandResponse {
 
 pub async fn heartbeat<S: SyncState>(
     State(state): State<S>,
+    _ctx: SyncServiceContext,
     Json(req): Json<HeartbeatRequest>,
 ) -> SyncResult<Json<HeartbeatResponse>> {
     const VALID_STATUSES: &[&str] = &[
