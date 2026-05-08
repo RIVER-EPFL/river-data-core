@@ -2,28 +2,15 @@ use axum::extract::State;
 use axum::Json;
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, Set};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{SyncError, SyncResult};
+use crate::models::{EnrollRequest, EnrollResponse};
 use crate::server::entity::{sync_service_credentials, sync_service_tokens, sync_services};
-use crate::server::state::SyncState;
 use crate::server::handlers::heartbeat::SESSION_TOKEN_CACHE;
+use crate::server::state::SyncState;
 
 const SESSION_TOKEN_TTL_MINUTES: i64 = 15;
-
-#[derive(Deserialize)]
-pub struct EnrollRequest {
-    pub client_id: String,
-    pub client_secret: String,
-    pub instance_id: String,
-}
-
-#[derive(Serialize)]
-pub struct EnrollResponse {
-    pub service_id: Uuid,
-    pub session_token: String,
-}
 
 pub(crate) async fn create_session_token<S: SyncState>(
     state: &S,

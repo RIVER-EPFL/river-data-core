@@ -2,19 +2,13 @@ use axum::extract::{Path, State};
 use axum::Json;
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
-use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{SyncError, SyncResult};
+use crate::models::CommandUpdateRequest;
 use crate::server::entity::sync_commands;
 use crate::server::middleware::SyncServiceContext;
 use crate::server::state::SyncState;
-
-#[derive(Deserialize)]
-pub struct CommandUpdateRequest {
-    pub status: String,
-    pub result: Option<serde_json::Value>,
-}
 
 pub async fn update_command<S: SyncState>(
     State(state): State<S>,

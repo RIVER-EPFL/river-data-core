@@ -3,12 +3,12 @@ use axum::Json;
 use chrono::Utc;
 use moka::future::Cache;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, Set, Statement, DatabaseBackend};
-use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 use std::time::Duration;
 use uuid::Uuid;
 
 use super::{SyncError, SyncResult};
+use crate::models::{HeartbeatRequest, HeartbeatResponse, PendingCommand};
 use crate::server::entity::{sync_commands, sync_services};
 use crate::server::handlers::enroll::create_session_token;
 use crate::server::middleware::SyncServiceContext;
@@ -20,26 +20,6 @@ pub(crate) static SESSION_TOKEN_CACHE: LazyLock<Cache<Uuid, String>> = LazyLock:
         .time_to_live(Duration::from_secs(13 * 60))
         .build()
 });
-
-#[derive(Deserialize)]
-pub struct HeartbeatRequest {
-    pub service_id: Uuid,
-    pub status: String,
-    pub current_operation: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct HeartbeatResponse {
-    pub session_token: String,
-    pub pending_commands: Vec<PendingCommandResponse>,
-}
-
-#[derive(Serialize)]
-pub struct PendingCommandResponse {
-    pub id: Uuid,
-    pub command: String,
-    pub payload: Option<serde_json::Value>,
-}
 
 pub async fn heartbeat<S: SyncState>(
     State(state): State<S>,
@@ -91,7 +71,7 @@ pub async fn heartbeat<S: SyncState>(
 
     let pending_commands = pending
         .into_iter()
-        .map(|c| PendingCommandResponse {
+        .map(|c| PendingCommand {
             id: c.id,
             command: c.command,
             payload: c.payload,

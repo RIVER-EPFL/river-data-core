@@ -44,25 +44,23 @@ pub async fn create_sync_event<S: SyncState>(
     const VALID_EVENT_STATUSES: &[&str] =
         &["running", "completed", "partial", "failed", "cancelled"];
 
-    if let Some(ref event_type) = req.event_type {
-        if !VALID_EVENT_TYPES.contains(&event_type.as_str()) {
+    if let Some(ref event_type) = req.event_type
+        && !VALID_EVENT_TYPES.contains(&event_type.as_str()) {
             return Err(SyncError::BadRequest(format!(
                 "Invalid event_type '{}'. Valid: {}",
                 event_type,
                 VALID_EVENT_TYPES.join(", ")
             )));
         }
-    }
 
-    if let Some(ref status) = req.status {
-        if !VALID_EVENT_STATUSES.contains(&status.as_str()) {
+    if let Some(ref status) = req.status
+        && !VALID_EVENT_STATUSES.contains(&status.as_str()) {
             return Err(SyncError::BadRequest(format!(
                 "Invalid status '{}'. Valid: {}",
                 status,
                 VALID_EVENT_STATUSES.join(", ")
             )));
         }
-    }
 
     let event = sync_events::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -138,8 +136,8 @@ pub async fn update_sync_event<S: SyncState>(
 
     active.update(state.db()).await?;
 
-    if is_success {
-        if let Some(service) = sync_services::Entity::find_by_id(service_id)
+    if is_success
+        && let Some(service) = sync_services::Entity::find_by_id(service_id)
             .one(state.db())
             .await?
         {
@@ -148,7 +146,6 @@ pub async fn update_sync_event<S: SyncState>(
             svc_active.updated_at = Set(Utc::now().into());
             svc_active.update(state.db()).await?;
         }
-    }
 
     Ok(Json(serde_json::json!({"updated": true})))
 }

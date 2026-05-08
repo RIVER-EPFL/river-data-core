@@ -5,14 +5,14 @@ use uuid::Uuid;
 // Enrollment
 // ============================================================================
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EnrollRequest {
     pub client_id: String,
     pub client_secret: String,
     pub instance_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EnrollResponse {
     pub service_id: Uuid,
     pub session_token: String,
@@ -22,20 +22,20 @@ pub struct EnrollResponse {
 // Heartbeat
 // ============================================================================
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct HeartbeatRequest {
     pub service_id: Uuid,
     pub status: String,
     pub current_operation: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct HeartbeatResponse {
     pub session_token: String,
     pub pending_commands: Vec<PendingCommand>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingCommand {
     pub id: Uuid,
     pub command: String,
@@ -46,7 +46,7 @@ pub struct PendingCommand {
 // Command Updates
 // ============================================================================
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CommandUpdateRequest {
     pub status: String,
     pub result: Option<serde_json::Value>,
@@ -138,12 +138,6 @@ pub struct RegisterStreamRequest {
     pub metadata: serde_json::Value,
 }
 
-#[derive(Debug, Serialize)]
-pub struct IngestReadingsRequest {
-    pub stream_id: Uuid,
-    pub readings: Vec<IngestReading>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct IngestReading {
     pub time: chrono::DateTime<chrono::Utc>,
@@ -163,12 +157,6 @@ fn is_zero(v: &i16) -> bool {
 }
 
 #[derive(Debug, Serialize)]
-pub struct IngestStatusEventsRequest {
-    pub stream_id: Uuid,
-    pub events: Vec<IngestStatusEvent>,
-}
-
-#[derive(Debug, Serialize)]
 pub struct IngestStatusEvent {
     pub time: chrono::DateTime<chrono::Utc>,
     pub value: String,
@@ -183,11 +171,11 @@ mod tests {
         let req = EnrollRequest {
             client_id: "svc_abc".to_string(),
             client_secret: "secret123".to_string(),
-            instance_id: "vaisala-01".to_string(),
+            instance_id: "service-01".to_string(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["client_id"], "svc_abc");
-        assert_eq!(json["instance_id"], "vaisala-01");
+        assert_eq!(json["instance_id"], "service-01");
     }
 
     #[test]
@@ -255,24 +243,24 @@ mod tests {
     #[test]
     fn test_register_stream_request() {
         let req = RegisterStreamRequest {
-            source_system: "vaisala".to_string(),
-            source_key: "loc_1270".to_string(),
-            source_name: Some("MDepthmm".to_string()),
+            source_system: "test_system".to_string(),
+            source_key: "source_1".to_string(),
+            source_name: Some("stream_a".to_string()),
             source_path: None,
-            metadata: serde_json::json!({"device": "25284027"}),
+            metadata: serde_json::json!({"device": "dev_001"}),
         };
         let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["source_system"], "vaisala");
-        assert_eq!(json["metadata"]["device"], "25284027");
+        assert_eq!(json["source_system"], "test_system");
+        assert_eq!(json["metadata"]["device"], "dev_001");
     }
 
     #[test]
     fn test_data_stream_deserialization() {
         let json = serde_json::json!({
             "id": "550e8400-e29b-41d4-a716-446655440000",
-            "source_system": "vaisala",
-            "source_key": "loc_1270",
-            "source_name": "MDepthmm",
+            "source_system": "test_system",
+            "source_key": "source_1",
+            "source_name": "stream_a",
             "source_path": null,
             "metadata": {},
             "site_parameter_id": null,
@@ -280,7 +268,7 @@ mod tests {
             "last_data_time": null
         });
         let stream: DataStream = serde_json::from_value(json).unwrap();
-        assert_eq!(stream.source_system, "vaisala");
+        assert_eq!(stream.source_system, "test_system");
         assert!(stream.is_active);
         assert!(stream.site_parameter_id.is_none());
     }
