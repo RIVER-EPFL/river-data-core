@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.93"
 description = "Core sync control plane library for River Data services"
 license = "MIT"
+repository = "https://github.com/RIVER-EPFL/river-data-core"
+keywords = ["sync", "control-plane", "axum", "sea-orm"]
+categories = ["web-programming", "database"]
 
 [lints.rust]
 unsafe_code = "forbid"
