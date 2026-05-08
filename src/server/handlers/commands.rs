@@ -1,0 +1,59 @@
+use axum::extract::{Path, State};
+use axum::Json;
+use chrono::Utc;
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use serde::Deserialize;
+use uuid::Uuid;
+
+use super::{SyncError, SyncResult};
+use crate::server::entity::sync_commands;
+use crate::server::middleware::SyncServiceContext;
+use crate::server::state::SyncState;
+
+#[derive(Deserialize)]
+pub struct CommandUpdateRequest {
+    pub status: String,
+    pub result: Option<serde_json::Value>,
+}
+
+pub async fn update_command<S: SyncState>(
+    State(state): State<S>,
+    ctx: SyncServiceContext,
+    Path(command_id): Path<Uuid>,
+    Json(req): Json<CommandUpdateRequest>,
+) -> SyncResult<Json<serde_json::Value>> {
+    let cmd = sync_commands::Entity::find_by_id(command_id)
+        .one(state.db())
+        .await?
+        .ok_or_else(|| SyncError::NotFound("Command not found".to_string()))?;
+
+    if cmd.service_id != ctx.service_id {
+        return Err(SyncError::Forbidden(
+            "Command does not belong to this service".to_string(),
+        ));
+    }
+
+    let valid_statuses = ["acknowledged", "completed", "failed"];
+    if !valid_statuses.contains(&req.status.as_str()) {
+        return Err(SyncError::BadRequest(format!(
+            "Invalid status '{}'. Valid: {}",
+            req.status,
+            valid_statuses.join(", ")
+        )));
+    }
+
+    let mut active: sync_commands::ActiveModel = cmd.into();
+    active.status = Set(req.status.clone());
+    if req.result.is_some() {
+        active.result = Set(req.result);
+    }
+    if req.status == "acknowledged" {
+        active.acknowledged_at = Set(Some(Utc::now().into()));
+    }
+    if req.status == "completed" || req.status == "failed" {
+        active.completed_at = Set(Some(Utc::now().into()));
+    }
+    active.update(state.db()).await?;
+
+    Ok(Json(serde_json::json!({"updated": true})))
+}
