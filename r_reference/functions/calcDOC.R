@@ -17,12 +17,12 @@ calcDOC <- function(df, func, pool) {
       colnames(df)
     )
   ) == 4
-
+  
   if (nrow(df) == 1 & ncol(df) == 4 & allColumns) {
     # Split df
     stdCurveId <- df %>% pull('doc_std_curve_id')
     reps <- df %>% select(-doc_std_curve_id)
-
+    
     # Correct values if there is a std curve id
     if (!is.na(stdCurveId) & stdCurveId  > 0) {
       stdCurve <- getRows(pool, 'standard_curves', id == stdCurveId)
@@ -30,7 +30,7 @@ calcDOC <- function(df, func, pool) {
         across(everything(), ~.x * stdCurve$a + stdCurve$b)
       )
     }
-
+    
     # Run calculation function (either mean or sd)
     return(
       func(reps)

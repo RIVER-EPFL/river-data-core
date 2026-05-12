@@ -17,11 +17,11 @@ calcChlaNoAcid <- function(df, pool, ...) {
       colnames(df)
     )
   ) == 2
-
+  
   if (nrow(df) == 1 & allColumns) {
     # Get values
     lab_chla_fluor_1_rep <- df %>% select(starts_with('lab_chla_fluor_1_rep')) %>% pull()
-
+    
     # Get std curve values for correction
     stdCurveId <- df %>% pull('chla_noacid_std_curve_id')
     if (!is.na(stdCurveId) & stdCurveId > 0) {
@@ -32,7 +32,7 @@ calcChlaNoAcid <- function(df, pool, ...) {
       chla_non_acidified_slope <- NA
       chla_non_acidified_intercept <- NA
     }
-
+    
     # If no NAs, calculate Chla non acidified
     if (!any(is.na(c(lab_chla_fluor_1_rep, chla_non_acidified_slope, chla_non_acidified_intercept)))) {
       return(
@@ -40,8 +40,8 @@ calcChlaNoAcid <- function(df, pool, ...) {
       )
     }
   }
-
-
+  
+  
   # If nothing is returned, return 'KEEP OLD'
   'KEEP OLD'
 }

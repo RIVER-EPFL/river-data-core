@@ -11,7 +11,7 @@ calcMinus <- function(df, ...) {
     # Get the two first clumns of the df
     col1 <- df %>% pull(1)
     col2 <- df %>% pull(2)
-
+    
     # Check that they are number non NA
     values <- c(col1, col2)
     if (length(values) == 2 & !any(is.na(values)) & is.numeric(values)) {
@@ -19,7 +19,7 @@ calcMinus <- function(df, ...) {
       return(col1 - col2)
     }
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

@@ -12,7 +12,7 @@ calcAlt2BP <- function(df, pool, ...) {
     temp <- df %>% pull('WTW_Temp_degC_1')
     # Get elevation
     elev <- getRows(pool, 'stations', name == station, columns = c('order', 'elevation')) %>% arrange(order) %>% pull(elevation)
-
+    
     # If there is an elevation and a temp, calculate the pressure in hPa
     if (!any(is.na(c(elev, temp)))) {
       return(
@@ -20,7 +20,7 @@ calcAlt2BP <- function(df, pool, ...) {
       )
     }
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

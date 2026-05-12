@@ -11,7 +11,7 @@ calcEquals <- function(df, ...) {
     # Get the two first clumns of the df
     col1 <- df %>% pull(1)
     col2 <- df %>% pull(2)
-
+    
     # If col1 is NA, set it to col2
     if (is.na(col1)) {
       # Return the difference
@@ -20,7 +20,7 @@ calcEquals <- function(df, ...) {
       return(col1)
     }
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

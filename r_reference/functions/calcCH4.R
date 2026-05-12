@@ -11,7 +11,7 @@ calcCH4 <- function(df, pool, labTemp = 'default', labPa = 'default', ...) {
     labTemp = labTemp,
     labPa = labPa
   )
-
+  
   # Check for the presence of the correct columns
   allColumns <- sum(
     grepl(
@@ -27,14 +27,14 @@ calcCH4 <- function(df, pool, labTemp = 'default', labPa = 'default', ...) {
       colnames(df)
     )
   ) == 6
-
+  
   if (nrow(df) == 1 & allColumns) {
     # Define constants to get
     cst_to_get <- c('lab_press_avg_atm', 'lab_temp_avg_degC', 'ch4_in_sa', 'gas_const_r_mol', 'h_ch4_29815k')
-
+    
     # Get constants
     constants <- getRows(pool, 'constants', name %in% cst_to_get, columns = c('name', 'value'))
-
+    
     # Determine which constant to use, from data entry (db) or constant table (cst)
     # The default argument will prevail the 'db' and then fallback to the 'cst'
     for (param in names(labParams)) {
@@ -62,10 +62,10 @@ calcCH4 <- function(df, pool, labTemp = 'default', labPa = 'default', ...) {
             pull('value')
       }
     }
-
+    
     # Calculate temp in Kelvin
     labParams$labTemp <- labParams$labTemp + 273.15
-
+    
     # values needed
     ch4_dry <- df %>% select(starts_with('lab_co2_ch4_dry')) %>% pull()
     water_temp_k <- 273.15 + df %>% pull('WTW_Temp_degC_1')
@@ -79,21 +79,21 @@ calcCH4 <- function(df, pool, labTemp = 'default', labPa = 'default', ...) {
       # Else use altPressure
       bp <- altPressure
     }
-
+    
     # Constant needed
     ch4_in_sa <- constants %>% filter(name == 'ch4_in_sa') %>% pull('value')
     gas_const_r_mol <- constants %>% filter(name == 'gas_const_r_mol') %>% pull('value')
     h_ch4_29815k <- constants %>% filter(name == 'h_ch4_29815k') %>% pull('value')
-
+    
     if (!any(is.na(c(ch4_dry, water_temp_k, bp, ch4_in_sa, gas_const_r_mol, h_ch4_29815k, labParams$labTemp, labParams$labPa)))) {
       # Calculate intermediate variables
       h_ch4_t_eq <- h_ch4_29815k * exp(1750 * (1/labParams$labTemp - 1/298.15))
       A <- ch4_dry * (0.957237 * 1013.25) * 101.325 * water_temp_k - bp * (ch4_in_sa * labParams$labTemp * 10^3)
       B <- h_ch4_t_eq * gas_const_r_mol * 10 * water_temp_k + bp
-
+      
       dividend <- A * B
       divisor <- labParams$labTemp * bp * gas_const_r_mol * water_temp_k
-
+      
       # Check for presence of both dividend and divisor
       if (divisor != 0) {
         return(
@@ -103,7 +103,7 @@ calcCH4 <- function(df, pool, labTemp = 'default', labPa = 'default', ...) {
       }
     }
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

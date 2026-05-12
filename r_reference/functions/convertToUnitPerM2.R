@@ -9,10 +9,10 @@ convertToUnitPerM2 <- function(s, d, vf, vt) {
   # Convert sample value (s) to a sample unit/m2
   # Using rock dimensions (d) format: c(length , width, depth)
   # Sample volume (vt) and volume filtrated (vf)
-
+  
   # Calculate area
   area <- 2 * pi * mean(combn((d / 100)^1.6075, 2, prod))^(1/1.6075)
-
+  
   # Convert to unit/m2
   s * vt / (vf * area)
 }

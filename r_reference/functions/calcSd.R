@@ -13,7 +13,7 @@ calcSd <- function(df, ...) {
     if (is.na(stdev)) stdev <- 'KEEP OLD'
     return(stdev)
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

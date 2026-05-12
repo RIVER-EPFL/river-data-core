@@ -13,7 +13,7 @@ calcMean <- function(df, ...) {
     if (is.na(avg)) avg <- 'KEEP OLD'
     return(avg)
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

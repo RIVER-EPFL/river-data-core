@@ -21,7 +21,7 @@ calcBenthicAFDM <- function(df, ...) {
       colnames(df)
     )
   ) == 6
-
+  
   if (nrow(df) == 1 & allColumns) {
     # Get values
     lab_chla_sizeA_rep <- df %>% select(starts_with('lab_chla_sizeA_rep')) %>% pull()
@@ -30,7 +30,7 @@ calcBenthicAFDM <- function(df, ...) {
     lab_chla_tot_vol_rep <- df %>% select(starts_with('lab_chla_tot_vol_rep')) %>% pull()
     lab_chla_vol_filtrated_rep <- df %>% select(starts_with('lab_chla_vol_filtrated_rep')) %>% pull()
     afdm_g_filter_rep <- df %>% select(starts_with('afdm_g_filter_rep')) %>% pull()
-
+    
     # If no NAs, calculate AFDM per m2
     if (!any(is.na(c(lab_chla_sizeA_rep, lab_chla_sizeB_rep, lab_chla_sizeC_rep, lab_chla_tot_vol_rep, lab_chla_vol_filtrated_rep, afdm_g_filter_rep)))) {
       return(
@@ -43,8 +43,8 @@ calcBenthicAFDM <- function(df, ...) {
       )
     }
   }
-
-
+  
+  
   # If nothing is returned, return 'KEEP OLD'
   'KEEP OLD'
 }

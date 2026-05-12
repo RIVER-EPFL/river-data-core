@@ -11,7 +11,7 @@ calcTSS <- function(df, ...) {
     wgtDried <- df %>% pull('lab_tss_wgt_samp_filt_dried')
     wgtPrefilt <- df %>% pull('lab_tss_wgt_filt_prefiltr')
     volFiltered <- df %>% pull('lab_tss_vol_filtered')
-
+    
     # Check values
     values <- c(wgtDried, wgtPrefilt, volFiltered)
     if (length(values) == 3 & !any(is.na(values)) & is.numeric(values)) {
@@ -21,7 +21,7 @@ calcTSS <- function(df, ...) {
       )
     }
   }
-
+  
   # If nothing is returned, return 'KEEP OLD'
   'KEEP OLD'
 }

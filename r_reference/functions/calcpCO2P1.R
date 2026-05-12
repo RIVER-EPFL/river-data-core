@@ -19,14 +19,14 @@ calcpCO2P1 <- function(df, pool, ...) {
       colnames(df)
     )
   ) == 4
-
+  
   if (nrow(df) == 1 & allColumns) {
     # Define constants to get
     cst_to_get <- c('c_const')
-
+    
     # Get constants
     constants <- getRows(pool, 'constants', name %in% cst_to_get, columns = c('name', 'value'))
-
+    
     # values needed
     co2 <- df %>% select(starts_with('CO2_HS_Um')) %>% pull()
     water_temp_k <- 273.15 + df %>% pull('WTW_Temp_degC_1')
@@ -40,15 +40,15 @@ calcpCO2P1 <- function(df, pool, ...) {
       # Else use altPressure
       bp <- altPressure
     }
-
+    
     # Constant needed
     c_const <- constants %>% filter(name == 'c_const') %>% pull('value')
-
+    
     if (!any(is.na(c(co2, water_temp_k, bp, c_const)))) {
       # Calculate intermediate variables
       dividend <- co2 * bp
       divisor <- 0.034 * exp(c_const * (1/water_temp_k - 1/298.15)) * 1013.25
-
+      
       # Check for presence of both dividend and divisor
       if (divisor != 0) {
         return(
@@ -58,7 +58,7 @@ calcpCO2P1 <- function(df, pool, ...) {
       }
     }
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

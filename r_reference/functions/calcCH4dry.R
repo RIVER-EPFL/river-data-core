@@ -17,12 +17,12 @@ calcCH4dry <- function(df, ...) {
       colnames(df)
     )
   ) == 2
-
+  
   if (nrow(df) == 1 & allColumns) {
     # Get values
     lab_co2_h2o <- df %>% select(matches('lab_co2(air)?_h2o')) %>% pull()
     lab_co2_ch4 <- df %>% select(matches('lab_co2(air)?_ch4')) %>% pull()
-
+    
     # If no NAs, calculate Chla acidified
     if (!any(is.na(c(lab_co2_h2o, lab_co2_ch4)))) {
       return(
@@ -30,8 +30,8 @@ calcCH4dry <- function(df, ...) {
       )
     }
   }
-
-
+  
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

@@ -13,13 +13,13 @@ calcCO2corr <- function(df, pool, ...) {
     fieldPressure <- df %>% pull('Field_BP')
     altPressure <- df %>% pull('Field_BP_altitude')
     stdCurveId <- df %>% pull('vaisala_std_curve_id')
-
+    
     # Correct values if there is a std curve id
     if (!is.na(stdCurveId) & stdCurveId  > 0) {
       stdCurve <- getRows(pool, 'standard_curves', id == stdCurveId)
       rawCO2 <- rawCO2 * stdCurve$a + stdCurve$b
     }
-
+   
     # If there is a temp
     if (!is.na(temp)) {
       # And that the fieldPressure is present and within the range
@@ -37,7 +37,7 @@ calcCO2corr <- function(df, pool, ...) {
       }
     }
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

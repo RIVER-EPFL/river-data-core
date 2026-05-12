@@ -10,7 +10,7 @@ calcSUVA <- function(df, ...) {
   if (nrow(df) == 1 & all(c('a254', 'DOC_avg_ppb') %in% colnames(df))) {
     a254 <- df %>% pull('a254')
     DOC_avg <- df %>% pull('DOC_avg_ppb')
-
+    
     # Check for presence of DOC_avg and a254
     if (!any(is.na(c(a254, DOC_avg)))) {
       return(
@@ -18,7 +18,7 @@ calcSUVA <- function(df, ...) {
       )
     }
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }

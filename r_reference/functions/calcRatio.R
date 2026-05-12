@@ -10,7 +10,7 @@ calcRatio <- function(df, ...) {
   if (nrow(df) == 1 & ncol(df) == 2) {
     dividend <- df %>% pull(1)
     divisor <- df %>% pull(2)
-
+    
     # Check for presence of both dividend and divisor
     if (!any(is.na(c(dividend, divisor))) & divisor != 0) {
       return(
@@ -18,7 +18,7 @@ calcRatio <- function(df, ...) {
       )
     }
   }
-
+  
   # If nothing is returned, return NA
   as.numeric(NA)
 }
