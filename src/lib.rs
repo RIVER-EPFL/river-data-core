@@ -8,3 +8,6 @@ pub mod client;
 
 #[cfg(feature = "server")]
 pub mod server;
+
+#[cfg(feature = "toolbox")]
+pub mod toolbox;

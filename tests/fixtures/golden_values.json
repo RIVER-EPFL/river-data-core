@@ -1,0 +1,1003 @@
+{
+  "metadata": {
+    "generator": "r_reference/generate_fixtures.R",
+    "r_version": "4.6.0",
+    "generated_at": "2026-05-11T14:44:42Z"
+  },
+  "modules": {
+    "common": {
+      "mean": [
+        {
+          "name": "three_values",
+          "inputs": {
+            "values": [1, 2, 3]
+          },
+          "expected": 2,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "single_value",
+          "inputs": {
+            "values": 42
+          },
+          "expected": 42,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "with_na",
+          "inputs": {
+            "values": [1, null, 3]
+          },
+          "expected": 2,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "all_na",
+          "inputs": {
+            "values": [null, null]
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "negative_values",
+          "inputs": {
+            "values": [-5, 10, -3]
+          },
+          "expected": 0.666666666666667,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "large_spread",
+          "inputs": {
+            "values": [0.001, 1000000]
+          },
+          "expected": 500000.0005,
+          "tolerance": 1e-10
+        }
+      ],
+      "std_dev": [
+        {
+          "name": "basic",
+          "inputs": {
+            "values": [2, 4, 4, 4, 5, 5, 7, 9]
+          },
+          "expected": 2.1380899352994,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "two_values",
+          "inputs": {
+            "values": [1, 3]
+          },
+          "expected": 1.4142135623731,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "single_value",
+          "inputs": {
+            "values": 5
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "with_na",
+          "inputs": {
+            "values": [1, null, 5]
+          },
+          "expected": 2.82842712474619,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "all_na",
+          "inputs": {
+            "values": [null, null]
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "identical_values",
+          "inputs": {
+            "values": [3, 3, 3]
+          },
+          "expected": 0,
+          "tolerance": 1e-10
+        }
+      ],
+      "minus": [
+        {
+          "name": "positive",
+          "inputs": {
+            "a": 10,
+            "b": 3
+          },
+          "expected": 7,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "negative_result",
+          "inputs": {
+            "a": 3,
+            "b": 10
+          },
+          "expected": -7,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "zero",
+          "inputs": {
+            "a": 5,
+            "b": 5
+          },
+          "expected": 0,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "a_na",
+          "inputs": {
+            "a": null,
+            "b": 3
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "b_na",
+          "inputs": {
+            "a": 10,
+            "b": null
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "equals": [
+        {
+          "name": "primary_valid",
+          "inputs": {
+            "primary": 42,
+            "fallback": 99
+          },
+          "expected": 42,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "primary_na",
+          "inputs": {
+            "primary": null,
+            "fallback": 99
+          },
+          "expected": 99,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "both_na",
+          "inputs": {
+            "primary": null,
+            "fallback": null
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "ratio": [
+        {
+          "name": "normal",
+          "inputs": {
+            "dividend": 10,
+            "divisor": 3
+          },
+          "expected": 3.33333333333333,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "zero_divisor",
+          "inputs": {
+            "dividend": 10,
+            "divisor": 0
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "dividend_na",
+          "inputs": {
+            "dividend": null,
+            "divisor": 3
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "negative",
+          "inputs": {
+            "dividend": -6,
+            "divisor": 2
+          },
+          "expected": -3,
+          "tolerance": 1e-10
+        }
+      ]
+    },
+    "tss_afdm": {
+      "tss_mg_l": [
+        {
+          "name": "normal",
+          "inputs": {
+            "wgt_dried": 0.1025,
+            "wgt_prefilt": 0.1,
+            "vol_filtered": 500
+          },
+          "expected": 4.99999999999998,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "turbid_sample",
+          "inputs": {
+            "wgt_dried": 0.115,
+            "wgt_prefilt": 0.1,
+            "vol_filtered": 250
+          },
+          "expected": 60,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "zero_volume",
+          "inputs": {
+            "wgt_dried": 0.1025,
+            "wgt_prefilt": 0.1,
+            "vol_filtered": 0
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "negative_tss",
+          "inputs": {
+            "wgt_dried": 0.099,
+            "wgt_prefilt": 0.1,
+            "vol_filtered": 500
+          },
+          "expected": -2,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "na_input",
+          "inputs": {
+            "wgt_dried": null,
+            "wgt_prefilt": 0.1,
+            "vol_filtered": 500
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "afdm_mg_l": [
+        {
+          "name": "normal",
+          "inputs": {
+            "wgt_dried": 0.1025,
+            "wgt_ashed": 0.1005,
+            "vol_filtered": 500
+          },
+          "expected": 3.99999999999998,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "zero_volume",
+          "inputs": {
+            "wgt_dried": 0.1025,
+            "wgt_ashed": 0.1005,
+            "vol_filtered": 0
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "na_input",
+          "inputs": {
+            "wgt_dried": 0.1025,
+            "wgt_ashed": null,
+            "vol_filtered": 500
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ]
+    },
+    "dom": {
+      "suva": [
+        {
+          "name": "normal",
+          "inputs": {
+            "a254": 0.15,
+            "doc_avg_ppb": 2500
+          },
+          "expected": 0.06,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "high_doc",
+          "inputs": {
+            "a254": 0.05,
+            "doc_avg_ppb": 8000
+          },
+          "expected": 0.00625,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "zero_doc",
+          "inputs": {
+            "a254": 0.15,
+            "doc_avg_ppb": 0
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "na_input",
+          "inputs": {
+            "a254": null,
+            "doc_avg_ppb": 2500
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ]
+    },
+    "doc": {
+      "doc_average": [
+        {
+          "name": "no_curve",
+          "inputs": {
+            "replicates": [120, 125, 118],
+            "slope": null,
+            "intercept": null
+          },
+          "expected": 121,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "with_curve",
+          "inputs": {
+            "replicates": [120, 125, 118],
+            "slope": 1.05,
+            "intercept": -2
+          },
+          "expected": 125.05,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "single_rep",
+          "inputs": {
+            "replicates": 120,
+            "slope": null,
+            "intercept": null
+          },
+          "expected": 120,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "all_na",
+          "inputs": {
+            "replicates": [null, null, null],
+            "slope": null,
+            "intercept": null
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "doc_std_dev": [
+        {
+          "name": "no_curve",
+          "inputs": {
+            "replicates": [120, 125, 118],
+            "slope": null,
+            "intercept": null
+          },
+          "expected": 3.60555127546399,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "with_curve",
+          "inputs": {
+            "replicates": [120, 125, 118],
+            "slope": 1.05,
+            "intercept": -2
+          },
+          "expected": 3.78582883923719,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "single_rep",
+          "inputs": {
+            "replicates": 120,
+            "slope": null,
+            "intercept": null
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ]
+    },
+    "chlorophyll": {
+      "chla_acid": [
+        {
+          "name": "normal",
+          "inputs": {
+            "fluor_before": 150,
+            "fluor_after": 80,
+            "slope": 0.25,
+            "intercept": -1.5
+          },
+          "expected": 16,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "zero_diff",
+          "inputs": {
+            "fluor_before": 100,
+            "fluor_after": 100,
+            "slope": 0.25,
+            "intercept": -1.5
+          },
+          "expected": -1.5,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "na_fluor",
+          "inputs": {
+            "fluor_before": null,
+            "fluor_after": 80,
+            "slope": 0.25,
+            "intercept": -1.5
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "chla_no_acid": [
+        {
+          "name": "normal",
+          "inputs": {
+            "fluor": 150,
+            "slope": 0.3,
+            "intercept": -2
+          },
+          "expected": 43,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "na_slope",
+          "inputs": {
+            "fluor": 150,
+            "slope": null,
+            "intercept": -2
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ]
+    },
+    "benthic": {
+      "rock_surface_area_m2": [
+        {
+          "name": "typical_rock",
+          "inputs": {
+            "dims_cm": [10, 8, 5]
+          },
+          "expected": 0.036555277612129,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "sphere",
+          "inputs": {
+            "dims_cm": [10, 10, 10]
+          },
+          "expected": 0.0628318530717959,
+          "tolerance": 1e-10
+        }
+      ],
+      "per_m2": [
+        {
+          "name": "normal",
+          "inputs": {
+            "sample_value": 0.005,
+            "dims_cm": [10, 8, 5],
+            "vol_filtrated": 50,
+            "vol_total": 200
+          },
+          "expected": 0.547116621906436,
+          "tolerance": 1e-10
+        }
+      ],
+      "benthic_afdm_per_m2": [
+        {
+          "name": "normal",
+          "inputs": {
+            "afdm_g": 0.003,
+            "dims_cm": [12, 9, 6],
+            "vol_filtrated": 50,
+            "vol_total": 250
+          },
+          "expected": 0.298674994181034,
+          "tolerance": 1e-10
+        }
+      ]
+    },
+    "field_data": {
+      "barometric_pressure_from_altitude": [
+        {
+          "name": "sea_level",
+          "inputs": {
+            "elevation_m": 0,
+            "temp_c": 15
+          },
+          "expected": 1013.25,
+          "tolerance": 0.5
+        },
+        {
+          "name": "martigny_470m",
+          "inputs": {
+            "elevation_m": 470,
+            "temp_c": 15
+          },
+          "expected": 958.611432364532,
+          "tolerance": 0.5
+        },
+        {
+          "name": "high_altitude_2000m",
+          "inputs": {
+            "elevation_m": 2000,
+            "temp_c": 5
+          },
+          "expected": 796.980175901167,
+          "tolerance": 0.5
+        },
+        {
+          "name": "zero_temp",
+          "inputs": {
+            "elevation_m": 1000,
+            "temp_c": 0
+          },
+          "expected": 895.432412127664,
+          "tolerance": 0.5
+        },
+        {
+          "name": "na_elevation",
+          "inputs": {
+            "elevation_m": null,
+            "temp_c": 15
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "co2_correction": [
+        {
+          "name": "no_curve",
+          "inputs": {
+            "raw_co2": 500,
+            "temp_c": 10,
+            "pressure_hpa": 850,
+            "std_slope": null,
+            "std_intercept": null
+          },
+          "expected": 441.783318624664,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "with_curve",
+          "inputs": {
+            "raw_co2": 500,
+            "temp_c": 10,
+            "pressure_hpa": 850,
+            "std_slope": 1.1,
+            "std_intercept": -5
+          },
+          "expected": 481.543817300884,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "ref_conditions",
+          "inputs": {
+            "raw_co2": 1013,
+            "temp_c": 25,
+            "pressure_hpa": 1013,
+            "std_slope": null,
+            "std_intercept": null
+          },
+          "expected": 1013,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "na_temp",
+          "inputs": {
+            "raw_co2": 500,
+            "temp_c": null,
+            "pressure_hpa": 850,
+            "std_slope": null,
+            "std_intercept": null
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ]
+    },
+    "pco2": {
+      "ch4_dry": [
+        {
+          "name": "normal",
+          "inputs": {
+            "ch4_wet": 2000,
+            "h2o_percent": 1.5
+          },
+          "expected": 2037.009,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "zero_h2o",
+          "inputs": {
+            "ch4_wet": 2000,
+            "h2o_percent": 0
+          },
+          "expected": 1999.968,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "high_h2o",
+          "inputs": {
+            "ch4_wet": 2000,
+            "h2o_percent": 3
+          },
+          "expected": 2074.05,
+          "tolerance": 1e-10
+        },
+        {
+          "name": "na_input",
+          "inputs": {
+            "ch4_wet": null,
+            "h2o_percent": 1.5
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "pco2_from_co2aq": [
+        {
+          "name": "alpine_10c",
+          "inputs": {
+            "co2_aq": 50,
+            "water_temp_c": 10,
+            "c_const": 2392.86
+          },
+          "expected": 961.267848988472,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "ref_25c",
+          "inputs": {
+            "co2_aq": 50,
+            "water_temp_c": 25,
+            "c_const": 2392.86
+          },
+          "expected": 1470.58823529412,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "cold_2c",
+          "inputs": {
+            "co2_aq": 100,
+            "water_temp_c": 2,
+            "c_const": 2392.86
+          },
+          "expected": 1503.71079659495,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "warm_30c",
+          "inputs": {
+            "co2_aq": 30,
+            "water_temp_c": 30,
+            "c_const": 2392.86
+          },
+          "expected": 1007.23452805482,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "na_temp",
+          "inputs": {
+            "co2_aq": 50,
+            "water_temp_c": null,
+            "c_const": 2392.86
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "pco2_p1": [
+        {
+          "name": "alpine_850hpa",
+          "inputs": {
+            "co2_aq": 50,
+            "water_temp_c": 10,
+            "bp_hpa": 850,
+            "c_const": 2392.86
+          },
+          "expected": 806.392964855861,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "sea_level",
+          "inputs": {
+            "co2_aq": 50,
+            "water_temp_c": 15,
+            "bp_hpa": 1013.25,
+            "c_const": 2392.86
+          },
+          "expected": 1113.08750808986,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "na_bp",
+          "inputs": {
+            "co2_aq": 50,
+            "water_temp_c": 10,
+            "bp_hpa": null,
+            "c_const": 2392.86
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "pco2_p2": [
+        {
+          "name": "alpine_850hpa",
+          "inputs": {
+            "co2_aq": 50,
+            "water_temp_c": 10,
+            "bp_hpa": 850,
+            "c_const": 2392.86
+          },
+          "expected": 1145.88782116185,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "sea_level",
+          "inputs": {
+            "co2_aq": 50,
+            "water_temp_c": 15,
+            "bp_hpa": 1013.25,
+            "c_const": 2392.86
+          },
+          "expected": 1113.08750808986,
+          "tolerance": 1e-06
+        }
+      ],
+      "dissolved_ch4": [
+        {
+          "name": "alpine_stream",
+          "inputs": {
+            "ch4_dry": 5000,
+            "water_temp_c": 10,
+            "bp_hpa": 850,
+            "lab_temp_c": 22,
+            "lab_pressure_atm": 0.95,
+            "kh_ch4": 0.0014,
+            "ch4_temp_const": 1750,
+            "ch4_in_sa": 1.9,
+            "gas_const_r_mol": 8.314
+          },
+          "expected": 206199.944113554,
+          "tolerance": 0.0001
+        },
+        {
+          "name": "warm_lowland",
+          "inputs": {
+            "ch4_dry": 3000,
+            "water_temp_c": 20,
+            "bp_hpa": 1013,
+            "lab_temp_c": 22,
+            "lab_pressure_atm": 1,
+            "kh_ch4": 0.0014,
+            "ch4_temp_const": 1750,
+            "ch4_in_sa": 1.9,
+            "gas_const_r_mol": 8.314
+          },
+          "expected": 129186.573884375,
+          "tolerance": 0.0001
+        },
+        {
+          "name": "na_input",
+          "inputs": {
+            "ch4_dry": null,
+            "water_temp_c": 10,
+            "bp_hpa": 850,
+            "lab_temp_c": 22,
+            "lab_pressure_atm": 0.95,
+            "kh_ch4": 0.0014,
+            "ch4_temp_const": 1750,
+            "ch4_in_sa": 1.9,
+            "gas_const_r_mol": 8.314
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ]
+    },
+    "co2_air": {
+      "co2_headspace": [
+        {
+          "name": "standard_lab",
+          "inputs": {
+            "co2_ppm": 400,
+            "lab_temp_c": 22,
+            "lab_pressure_atm": 0.95,
+            "vol_sa_ml": 60,
+            "vol_water_ml": 40,
+            "kh_co2": 0.034,
+            "c_const": 2392.86,
+            "gas_const_r_atm": 0.08206
+          },
+          "expected": 37.5524007115266,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "high_co2",
+          "inputs": {
+            "co2_ppm": 5000,
+            "lab_temp_c": 20,
+            "lab_pressure_atm": 1,
+            "vol_sa_ml": 60,
+            "vol_water_ml": 40,
+            "kh_co2": 0.034,
+            "c_const": 2392.86,
+            "gas_const_r_atm": 0.08206
+          },
+          "expected": 506.712748411474,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "ref_25c",
+          "inputs": {
+            "co2_ppm": 400,
+            "lab_temp_c": 25,
+            "lab_pressure_atm": 1,
+            "vol_sa_ml": 60,
+            "vol_water_ml": 40,
+            "kh_co2": 0.034,
+            "c_const": 2392.86,
+            "gas_const_r_atm": 0.08206
+          },
+          "expected": 38.1236395419001,
+          "tolerance": 1e-06
+        }
+      ]
+    },
+    "dic": {
+      "dic_concentration": [
+        {
+          "name": "normal",
+          "inputs": {
+            "acid_sample_wght": 12.5,
+            "acid_wght": 10,
+            "vol_overpressure": 0.5,
+            "sa_added": 0.3,
+            "co2_dry": 2000,
+            "air_temp_c": 22,
+            "h_co2_29815k": 0.00033,
+            "gas_const_r_mol": 8.314,
+            "vial_volume": 12,
+            "h3po4_added": 0.1
+          },
+          "expected": 0.337678876749197,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "cold_lab",
+          "inputs": {
+            "acid_sample_wght": 12.5,
+            "acid_wght": 10,
+            "vol_overpressure": 0.5,
+            "sa_added": 0.3,
+            "co2_dry": 2000,
+            "air_temp_c": 15,
+            "h_co2_29815k": 0.00033,
+            "gas_const_r_mol": 8.314,
+            "vial_volume": 12,
+            "h3po4_added": 0.1
+          },
+          "expected": 0.346024758825711,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "high_co2",
+          "inputs": {
+            "acid_sample_wght": 12.5,
+            "acid_wght": 10,
+            "vol_overpressure": 0.5,
+            "sa_added": 0.3,
+            "co2_dry": 10000,
+            "air_temp_c": 22,
+            "h_co2_29815k": 0.00033,
+            "gas_const_r_mol": 8.314,
+            "vial_volume": 12,
+            "h3po4_added": 0.1
+          },
+          "expected": 1.68839438374599,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "na_input",
+          "inputs": {
+            "acid_sample_wght": null,
+            "acid_wght": 10,
+            "vol_overpressure": 0.5,
+            "sa_added": 0.3,
+            "co2_dry": 2000,
+            "air_temp_c": 22,
+            "h_co2_29815k": 0.00033,
+            "gas_const_r_mol": 8.314,
+            "vial_volume": 12,
+            "h3po4_added": 0.1
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ],
+      "d13c_dic": [
+        {
+          "name": "normal",
+          "inputs": {
+            "acid_sample_wght": 12.5,
+            "acid_wght": 10,
+            "vol_overpressure": 0.5,
+            "delta_13co2": -12,
+            "air_temp_c": 22,
+            "h_co2_29815k": 0.00033,
+            "gas_const_r_mol": 8.314,
+            "vial_volume": 12,
+            "h3po4_added": 0.1
+          },
+          "expected": -12.0023460746169,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "positive_delta",
+          "inputs": {
+            "acid_sample_wght": 12.5,
+            "acid_wght": 10,
+            "vol_overpressure": 0.5,
+            "delta_13co2": 2,
+            "air_temp_c": 22,
+            "h_co2_29815k": 0.00033,
+            "gas_const_r_mol": 8.314,
+            "vial_volume": 12,
+            "h3po4_added": 0.1
+          },
+          "expected": 1.99765392538307,
+          "tolerance": 1e-06
+        },
+        {
+          "name": "na_delta",
+          "inputs": {
+            "acid_sample_wght": 12.5,
+            "acid_wght": 10,
+            "vol_overpressure": 0.5,
+            "delta_13co2": null,
+            "air_temp_c": 22,
+            "h_co2_29815k": 0.00033,
+            "gas_const_r_mol": 8.314,
+            "vial_volume": 12,
+            "h3po4_added": 0.1
+          },
+          "expected": null,
+          "tolerance": 1e-10
+        }
+      ]
+    }
+  }
+}

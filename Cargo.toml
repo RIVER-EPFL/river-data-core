@@ -16,6 +16,7 @@ unsafe_code = "forbid"
 default = []
 client = ["dep:reqwest"]
 server = ["dep:sea-orm", "dep:axum", "dep:moka"]
+toolbox = []
 
 [dependencies]
 # Always
