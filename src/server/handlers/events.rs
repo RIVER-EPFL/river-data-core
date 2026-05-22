@@ -11,7 +11,7 @@ use crate::server::entity::{sync_events, sync_services};
 use crate::server::middleware::SyncServiceContext;
 use crate::server::state::SyncState;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct CreateSyncEventRequest {
     pub service_id: Uuid,
     pub command_id: Option<Uuid>,
@@ -19,16 +19,33 @@ pub struct CreateSyncEventRequest {
     pub status: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateSyncEventRequest {
     pub status: Option<String>,
     pub readings_synced: Option<i64>,
     pub status_events_synced: Option<i64>,
+    #[schema(value_type = Object)]
     pub errors: Option<serde_json::Value>,
+    #[schema(value_type = Object)]
     pub log: Option<serde_json::Value>,
     pub duration_ms: Option<i64>,
 }
 
+/// Sync service reports the start of a sync operation. Returns the created event ID
+/// (used in subsequent `PATCH /events/{id}` calls). Validates event_type and status
+/// against the SyncEventType / SyncEventStatus enums. Requires sync session token auth.
+#[utoipa::path(
+    post,
+    path = "/events",
+    request_body = CreateSyncEventRequest,
+    responses(
+        (status = 200, description = "Event created; id and status returned"),
+        (status = 400, description = "Invalid event_type or status"),
+        (status = 401, description = "Invalid session token"),
+        (status = 403, description = "service_id does not match authenticated service"),
+    ),
+    tag = "sync"
+)]
 pub async fn create_sync_event<S: SyncState>(
     State(state): State<S>,
     ctx: SyncServiceContext,
@@ -86,6 +103,22 @@ pub async fn create_sync_event<S: SyncState>(
     })))
 }
 
+/// Sync service updates an in-progress event with metrics, errors, or completion status.
+/// Terminal statuses (`completed`/`failed`) auto-stamp `completed_at`. Successful events
+/// also update the owning service's `last_sync_completed_at`. Requires sync session token.
+#[utoipa::path(
+    patch,
+    path = "/events/{id}",
+    params(("id" = Uuid, Path, description = "Sync event UUID")),
+    request_body = UpdateSyncEventRequest,
+    responses(
+        (status = 200, description = "Event updated"),
+        (status = 401, description = "Invalid session token"),
+        (status = 403, description = "Event belongs to a different service"),
+        (status = 404, description = "Event not found"),
+    ),
+    tag = "sync"
+)]
 pub async fn update_sync_event<S: SyncState>(
     State(state): State<S>,
     ctx: SyncServiceContext,

@@ -16,6 +16,24 @@ const VALID_UPDATE_STATUSES: &[&str] = &[
     CommandStatus::Failed.as_str(),
 ];
 
+/// Sync service reports the lifecycle status of a command it received via heartbeat.
+/// Valid status transitions: `acknowledged` (in progress), `completed` (success with
+/// optional result payload), `failed` (with error result). Only the owning service can
+/// update its commands. Requires sync session token auth.
+#[utoipa::path(
+    patch,
+    path = "/commands/{id}",
+    params(("id" = Uuid, Path, description = "Sync command UUID")),
+    request_body = CommandUpdateRequest,
+    responses(
+        (status = 200, description = "Command updated"),
+        (status = 400, description = "Invalid status value"),
+        (status = 401, description = "Invalid session token"),
+        (status = 403, description = "Command belongs to a different service"),
+        (status = 404, description = "Command not found"),
+    ),
+    tag = "sync"
+)]
 pub async fn update_command<S: SyncState>(
     State(state): State<S>,
     ctx: SyncServiceContext,

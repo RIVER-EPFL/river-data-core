@@ -21,6 +21,20 @@ pub(crate) static SESSION_TOKEN_CACHE: LazyLock<Cache<Uuid, String>> = LazyLock:
         .build()
 });
 
+/// Periodic heartbeat from a sync service. Updates `last_heartbeat`, `status`, and
+/// `current_operation`. Returns a fresh session token (rotated on every heartbeat) and
+/// any pending commands queued for this service. Requires sync session token auth.
+#[utoipa::path(
+    post,
+    path = "/heartbeat",
+    request_body = HeartbeatRequest,
+    responses(
+        (status = 200, description = "Heartbeat acknowledged; fresh token and pending commands", body = HeartbeatResponse),
+        (status = 400, description = "Invalid status string"),
+        (status = 401, description = "Invalid or expired session token"),
+    ),
+    tag = "sync"
+)]
 pub async fn heartbeat<S: SyncState>(
     State(state): State<S>,
     _ctx: SyncServiceContext,

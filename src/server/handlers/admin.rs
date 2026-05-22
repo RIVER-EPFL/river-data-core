@@ -18,7 +18,7 @@ use crate::server::state::SyncState;
 // Response Types
 // ============================================================================
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SyncServiceResponse {
     pub id: Uuid,
     pub service_type: String,
@@ -69,13 +69,15 @@ fn service_to_response(s: sync_services::Model, config: &crate::models::SyncServ
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SyncCommandResponse {
     pub id: Uuid,
     pub service_id: Uuid,
     pub command: String,
+    #[schema(value_type = Object)]
     pub payload: Option<serde_json::Value>,
     pub status: String,
+    #[schema(value_type = Object)]
     pub result: Option<serde_json::Value>,
     pub created_at: String,
     pub expires_at: String,
@@ -98,24 +100,25 @@ fn command_to_response(c: sync_commands::Model) -> SyncCommandResponse {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct IssueCommandRequest {
     pub command: String,
+    #[schema(value_type = Object)]
     pub payload: Option<serde_json::Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct CreateCredentialRequest {
     pub service_type: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct CreateCredentialResponse {
     pub client_id: String,
     pub client_secret: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct CredentialResponse {
     pub id: Uuid,
     pub client_id: String,
@@ -125,7 +128,7 @@ pub struct CredentialResponse {
     pub created_at: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SyncEventResponse {
     pub id: Uuid,
     pub service_id: Uuid,
@@ -134,7 +137,9 @@ pub struct SyncEventResponse {
     pub status: String,
     pub readings_synced: i64,
     pub status_events_synced: i64,
+    #[schema(value_type = Object)]
     pub errors: Option<serde_json::Value>,
+    #[schema(value_type = Object)]
     pub log: Option<serde_json::Value>,
     pub started_at: String,
     pub completed_at: Option<String>,
@@ -158,7 +163,7 @@ fn sync_event_to_response(e: sync_events::Model) -> SyncEventResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct PaginationQuery {
     #[serde(default = "default_page")]
     pub page: u64,
@@ -177,6 +182,17 @@ fn default_per_page() -> u64 {
 // Handlers
 // ============================================================================
 
+/// List all registered sync services with their health (computed from `last_heartbeat`
+/// age vs `health_healthy_secs`/`health_warning_secs` thresholds in SyncServerConfig).
+/// Sorted by `updated_at` DESC. Requires `read_metadata`.
+#[utoipa::path(
+    get,
+    path = "/services",
+    responses(
+        (status = 200, description = "Registered sync services with health", body = [SyncServiceResponse]),
+    ),
+    tag = "sync"
+)]
 pub async fn list_services<S: SyncState>(
     State(state): State<S>,
 ) -> SyncResult<Json<Vec<SyncServiceResponse>>> {
@@ -189,6 +205,17 @@ pub async fn list_services<S: SyncState>(
     Ok(Json(services.into_iter().map(|s| service_to_response(s, config)).collect()))
 }
 
+/// Get a single sync service by ID with its computed health. Requires `read_metadata`.
+#[utoipa::path(
+    get,
+    path = "/services/{id}",
+    params(("id" = Uuid, Path, description = "Sync service UUID")),
+    responses(
+        (status = 200, description = "Sync service detail", body = SyncServiceResponse),
+        (status = 404, description = "Service not found"),
+    ),
+    tag = "sync"
+)]
 pub async fn get_service<S: SyncState>(
     State(state): State<S>,
     Path(id): Path<Uuid>,
@@ -201,6 +228,21 @@ pub async fn get_service<S: SyncState>(
     Ok(Json(service_to_response(service, state.sync_config())))
 }
 
+/// Queue a command for a sync service. The command is picked up on the next heartbeat
+/// (within `command_expiry_secs`). Valid commands: `trigger_sync`, `trigger_full_sync`,
+/// `pause`, `resume`. Requires `write_metadata`.
+#[utoipa::path(
+    post,
+    path = "/services/{id}/commands",
+    params(("id" = Uuid, Path, description = "Sync service UUID")),
+    request_body = IssueCommandRequest,
+    responses(
+        (status = 200, description = "Command queued; full command record returned", body = SyncCommandResponse),
+        (status = 400, description = "Invalid command name"),
+        (status = 404, description = "Service not found"),
+    ),
+    tag = "sync"
+)]
 pub async fn issue_command<S: SyncState>(
     State(state): State<S>,
     Path(service_id): Path<Uuid>,
@@ -243,6 +285,21 @@ pub async fn issue_command<S: SyncState>(
     Ok(Json(command_to_response(inserted)))
 }
 
+/// Paginated list of sync commands (newest first). Returns a `Content-Range: items {start}-{end}/{total}`
+/// header for React-admin style pagination. Requires `read_metadata`.
+#[utoipa::path(
+    get,
+    path = "/commands",
+    params(PaginationQuery),
+    responses(
+        (
+            status = 200,
+            description = "Page of commands. Response includes a `Content-Range` header with `items start-end/total` for pagination.",
+            body = [SyncCommandResponse]
+        ),
+    ),
+    tag = "sync"
+)]
 pub async fn list_commands<S: SyncState>(
     State(state): State<S>,
     Query(params): Query<PaginationQuery>,
@@ -279,6 +336,19 @@ pub async fn list_commands<S: SyncState>(
     Ok((StatusCode::OK, headers, Json(commands)))
 }
 
+/// Mint a new enrollment credential (client_id + client_secret). The `client_secret` is
+/// returned in plaintext exactly ONCE — only the SHA-256 hash is stored. Used to bootstrap
+/// a new sync service instance. Gated by `require_admin` upstream (Keycloak Administrator
+/// only — no API token can pass).
+#[utoipa::path(
+    post,
+    path = "/credentials",
+    request_body = CreateCredentialRequest,
+    responses(
+        (status = 200, description = "Plaintext client_id and client_secret (only returned once)", body = CreateCredentialResponse),
+    ),
+    tag = "sync"
+)]
 pub async fn create_credential<S: SyncState>(
     State(state): State<S>,
     Json(req): Json<CreateCredentialRequest>,
@@ -307,6 +377,16 @@ pub async fn create_credential<S: SyncState>(
     }))
 }
 
+/// List enrollment credentials with their service binding and revocation status. The
+/// client_secret is never returned here — only the hash is stored. Requires `read_metadata`.
+#[utoipa::path(
+    get,
+    path = "/credentials",
+    responses(
+        (status = 200, description = "Credentials list (no secrets)", body = [CredentialResponse]),
+    ),
+    tag = "sync"
+)]
 pub async fn list_credentials<S: SyncState>(
     State(state): State<S>,
 ) -> SyncResult<Json<Vec<CredentialResponse>>> {
@@ -330,6 +410,19 @@ pub async fn list_credentials<S: SyncState>(
     ))
 }
 
+/// Revoke an enrollment credential and immediately invalidate every active session
+/// token bound to its service. Subsequent heartbeat or command updates will be rejected
+/// as 401. Requires Keycloak Administrator (`require_admin` upstream).
+#[utoipa::path(
+    post,
+    path = "/credentials/{id}/revoke",
+    params(("id" = Uuid, Path, description = "Credential UUID")),
+    responses(
+        (status = 200, description = "Credential revoked, active sessions terminated"),
+        (status = 404, description = "Credential not found"),
+    ),
+    tag = "sync"
+)]
 pub async fn revoke_credential<S: SyncState>(
     State(state): State<S>,
     Path(id): Path<Uuid>,
@@ -353,6 +446,22 @@ pub async fn revoke_credential<S: SyncState>(
     Ok(Json(serde_json::json!({"revoked": true})))
 }
 
+/// Paginated list of sync events (newest first). Returns a `Content-Range` header for
+/// React-admin style pagination. Each event records readings/status_events_synced counts,
+/// optional errors/log JSON payloads, and duration. Requires `read_metadata`.
+#[utoipa::path(
+    get,
+    path = "/events",
+    params(PaginationQuery),
+    responses(
+        (
+            status = 200,
+            description = "Page of sync events. Response includes a `Content-Range` header.",
+            body = [SyncEventResponse]
+        ),
+    ),
+    tag = "sync"
+)]
 pub async fn list_sync_events<S: SyncState>(
     State(state): State<S>,
     Query(params): Query<PaginationQuery>,
@@ -389,6 +498,18 @@ pub async fn list_sync_events<S: SyncState>(
     Ok((StatusCode::OK, headers, Json(response)))
 }
 
+/// Revoke a sync service: marks every credential bound to it as revoked AND deletes
+/// every active session token. The service is effectively forced off the control plane
+/// until a new credential is minted. Requires `write_metadata`.
+#[utoipa::path(
+    post,
+    path = "/services/{id}/revoke",
+    params(("id" = Uuid, Path, description = "Sync service UUID")),
+    responses(
+        (status = 200, description = "Service revoked"),
+    ),
+    tag = "sync"
+)]
 pub async fn revoke_service<S: SyncState>(
     State(state): State<S>,
     Path(id): Path<Uuid>,

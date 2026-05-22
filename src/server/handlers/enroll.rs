@@ -40,6 +40,20 @@ pub(crate) async fn create_session_token<S: SyncState>(
     Ok(raw_token)
 }
 
+/// Enroll a sync service instance with credentials. Validates `client_id`/`client_secret`
+/// against `sync_service_credentials`, registers or updates a `sync_services` row keyed
+/// by `(service_type, instance_id)`, and returns a session token used for subsequent
+/// authenticated requests (heartbeat, command updates, events). Unauthenticated.
+#[utoipa::path(
+    post,
+    path = "/enroll",
+    request_body = EnrollRequest,
+    responses(
+        (status = 200, description = "Service enrolled; session token returned", body = EnrollResponse),
+        (status = 401, description = "Invalid client_id, client_secret, or credentials revoked"),
+    ),
+    tag = "sync"
+)]
 pub async fn enroll<S: SyncState>(
     State(state): State<S>,
     Json(req): Json<EnrollRequest>,
