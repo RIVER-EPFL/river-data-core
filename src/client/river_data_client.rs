@@ -14,7 +14,7 @@ pub struct RiverDataClient {
 
 impl RiverDataClient {
     pub fn new(base_url: &str, token: &str) -> Result<Self, reqwest::Error> {
-        Self::with_config(base_url, token, "/api/service", 60)
+        Self::with_config(base_url, token, "/api/v1", 60)
     }
 
     pub fn with_config(
@@ -338,11 +338,11 @@ mod tests {
         let client = RiverDataClient::new("http://localhost:3000", "tok").unwrap();
         assert_eq!(
             client.url("/data_streams"),
-            "http://localhost:3000/api/service/data_streams"
+            "http://localhost:3000/api/v1/data_streams"
         );
         assert_eq!(
             client.url("/ingest"),
-            "http://localhost:3000/api/service/ingest"
+            "http://localhost:3000/api/v1/ingest"
         );
     }
 
@@ -351,7 +351,7 @@ mod tests {
         let client = RiverDataClient::new("http://localhost:3000/", "tok").unwrap();
         assert_eq!(
             client.url("/data_streams"),
-            "http://localhost:3000/api/service/data_streams"
+            "http://localhost:3000/api/v1/data_streams"
         );
     }
 
