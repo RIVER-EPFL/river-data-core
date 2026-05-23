@@ -16,7 +16,7 @@ pub struct ControlPlaneClient {
 
 impl ControlPlaneClient {
     pub fn new(base_url: &str) -> Result<Self, reqwest::Error> {
-        Self::with_config(base_url, "/api/service/sync", 30)
+        Self::with_config(base_url, "/api/v1/sync", 30)
     }
 
     pub fn with_config(
@@ -176,7 +176,7 @@ mod tests {
         let client = ControlPlaneClient::new("http://localhost:3000/").unwrap();
         assert_eq!(
             client.service_url("/enroll"),
-            "http://localhost:3000/api/service/sync/enroll"
+            "http://localhost:3000/api/v1/sync/enroll"
         );
     }
 
@@ -185,11 +185,11 @@ mod tests {
         let client = ControlPlaneClient::new("http://api:3000").unwrap();
         assert_eq!(
             client.service_url("/enroll"),
-            "http://api:3000/api/service/sync/enroll"
+            "http://api:3000/api/v1/sync/enroll"
         );
         assert_eq!(
             client.service_url("/heartbeat"),
-            "http://api:3000/api/service/sync/heartbeat"
+            "http://api:3000/api/v1/sync/heartbeat"
         );
     }
 
