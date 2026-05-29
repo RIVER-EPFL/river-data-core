@@ -7,9 +7,9 @@ use crate::server::state::SyncState;
 /// Build the sync control plane routers.
 ///
 /// Returns `(service_routes, admin_routes)`:
-/// - `service_routes`: Mount at `/api/v1/sync` — enrollment (unauthenticated),
+/// - `service_routes`: Mount at `/api/sync` — enrollment (unauthenticated),
 ///   heartbeat + commands + events (auth via SyncServiceContext extractor)
-/// - `admin_routes`: Mount at `/api/v1/sync` under admin middleware — the host app
+/// - `admin_routes`: Mount at `/api/sync` under admin middleware — the host app
 ///   should wrap with its own admin auth (e.g., Keycloak)
 pub fn routes<S: SyncState>() -> (Router<S>, Router<S>) {
     let service_routes = Router::new()
