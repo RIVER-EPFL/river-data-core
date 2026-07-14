@@ -305,6 +305,10 @@ pub struct DataStream {
     pub source_path: Option<String>,
     pub metadata: serde_json::Value,
     pub site_parameter_id: Option<Uuid>,
+    /// Stream-level default for readings.measurement_type ('continuous' | 'spot' | 'derived').
+    /// None defers to the API's sensor-frequency resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement_type: Option<String>,
     pub is_active: bool,
     pub last_data_time: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -316,6 +320,9 @@ pub struct RegisterStreamRequest {
     pub source_name: Option<String>,
     pub source_path: Option<String>,
     pub metadata: serde_json::Value,
+    /// Stream-level classification declared at discovery. None never clears an operator-set value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measurement_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -330,6 +337,10 @@ pub struct IngestReading {
     pub calibration_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_id: Option<Uuid>,
+    /// Per-reading override ('continuous' | 'spot' | 'derived'). None resolves server-side from
+    /// the stream default, then the owning sensor's data_frequency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measurement_type: Option<String>,
 }
 
 fn is_zero(v: &i16) -> bool {
