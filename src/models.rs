@@ -424,11 +424,13 @@ mod tests {
             sensor_id: None,
             calibration_id: None,
             deployment_id: None,
+            measurement_type: None,
         };
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["raw_value"], 42.5);
         assert!(json.get("replicate_index").is_none());
         assert!(json.get("sensor_id").is_none());
+        assert!(json.get("measurement_type").is_none());
     }
 
     #[test]
@@ -439,6 +441,7 @@ mod tests {
             source_name: Some("stream_a".to_string()),
             source_path: None,
             metadata: serde_json::json!({"device": "dev_001"}),
+            measurement_type: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["source_system"], "test_system");
