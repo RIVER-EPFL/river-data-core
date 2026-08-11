@@ -28,17 +28,6 @@ pub fn afdm_mg_l(wgt_dried_g: f64, wgt_ashed_g: f64, vol_filtered_ml: f64) -> f6
     1_000_000.0 * (wgt_dried_g - wgt_ashed_g) / vol_filtered_ml
 }
 
-/// Percent organic matter = AFDM / TSS * 100.
-///
-/// Returns NaN if TSS is zero.
-#[must_use]
-pub fn percent_organic(tss: f64, afdm: f64) -> f64 {
-    if tss == 0.0 {
-        return f64::NAN;
-    }
-    afdm / tss * 100.0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,18 +51,6 @@ mod tests {
         // dried=0.1050, ashed=0.1010, vol=500 => 1e6*(0.004)/500 = 8.0 mg/L
         let result = afdm_mg_l(0.1050, 0.1010, 500.0);
         assert!((result - 8.0).abs() < TOL, "expected 8.0, got {result}");
-    }
-
-    #[test]
-    fn test_percent_organic() {
-        // TSS=10, AFDM=8 => 80%
-        let result = percent_organic(10.0, 8.0);
-        assert!((result - 80.0).abs() < TOL, "expected 80.0, got {result}");
-    }
-
-    #[test]
-    fn test_percent_organic_zero_tss() {
-        assert!(percent_organic(0.0, 5.0).is_nan());
     }
 
     #[test]

@@ -1,13 +1,14 @@
-use super::pco2::GasConstants;
+use super::pco2::{GasConstants, H_CO2_LITERAL};
 
 /// Headspace CO2 concentration (µmol/L) from Picarro analysis.
 ///
 /// From R `calcCO2`:
 ///   exponent = exp(c_const * (1/T_lab_K - 1/298.15))
-///   CO2 = co2_ppm * P_lab * (vol_sa + kh_co2 * exponent * vol_water * R_atm * T_lab_K) / (R_atm * vol_water * T_lab_K)
+///   CO2 = co2_ppm * P_lab * (vol_sa + 0.034 * exponent * vol_water * R_atm * T_lab_K) / (R_atm * vol_water * T_lab_K)
 ///
-/// Returns CO2 concentration in µmol/L.
-#[allow(clippy::too_many_arguments)]
+/// The 0.034 Henry constant is the shared `H_CO2_LITERAL` portal literal. Volumes
+/// only enter as a ratio, so any consistent unit works. Returns CO2 concentration
+/// in µmol/L.
 #[must_use]
 pub fn co2_headspace(
     co2_ppm: f64,
@@ -22,26 +23,13 @@ pub fn co2_headspace(
     let dividend = co2_ppm
         * lab_pressure_atm
         * (vol_sa_ml
-            + constants.kh_co2 * exponent * vol_water_ml * constants.gas_const_r_atm * t_lab_k);
+            + H_CO2_LITERAL * exponent * vol_water_ml * constants.gas_const_r_atm * t_lab_k);
     let divisor = constants.gas_const_r_atm * vol_water_ml * t_lab_k;
 
     if divisor == 0.0 {
         return f64::NAN;
     }
     dividend / divisor
-}
-
-/// CO2 dry concentration from wet measurement, corrected for water vapor.
-///
-/// Simple dilution correction: CO2_dry = CO2_wet / (1 - h2o_fraction)
-/// where h2o is in percent.
-#[must_use]
-pub fn co2_dry(co2_wet: f64, h2o_percent: f64) -> f64 {
-    let h2o_fraction = h2o_percent / 100.0;
-    if (1.0 - h2o_fraction) == 0.0 {
-        return f64::NAN;
-    }
-    co2_wet / (1.0 - h2o_fraction)
 }
 
 /// CH4 dry concentration from wet measurement.
@@ -62,7 +50,6 @@ mod tests {
     #[test]
     fn test_co2_headspace_positive() {
         let constants = GasConstants::default();
-        // co2=400ppm, lab_temp=22°C, lab_pressure=0.95atm, vol_sa=60mL, vol_water=40mL
         let result = co2_headspace(400.0, 22.0, 0.95, 60.0, 40.0, &constants);
         assert!(
             result > 0.0 && result.is_finite(),
@@ -71,19 +58,9 @@ mod tests {
     }
 
     #[test]
-    fn test_co2_dry_correction() {
-        // 400 ppm wet at 2% h2o => 400 / 0.98 ≈ 408.16
-        let result = co2_dry(400.0, 2.0);
-        assert!(
-            (result - 408.163).abs() < 0.1,
-            "expected ~408.16, got {result}"
-        );
-    }
-
-    #[test]
-    fn test_co2_dry_zero_h2o() {
-        let result = co2_dry(400.0, 0.0);
-        assert!((result - 400.0).abs() < 1e-10);
+    fn test_co2_headspace_zero_water_volume() {
+        let constants = GasConstants::default();
+        assert!(co2_headspace(400.0, 22.0, 0.95, 60.0, 0.0, &constants).is_nan());
     }
 
     #[test]

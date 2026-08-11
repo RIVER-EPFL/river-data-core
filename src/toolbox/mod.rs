@@ -1,4 +1,3 @@
-pub mod alkalinity;
 pub mod benthic;
 pub mod chlorophyll;
 pub mod co2_air;
@@ -7,13 +6,10 @@ pub mod dic;
 pub mod doc;
 pub mod dom;
 pub mod field_data;
-pub mod ions;
-pub mod isotopes;
 pub mod nutrients;
 pub mod pco2;
 pub mod tss_afdm;
 
-pub use alkalinity::*;
 pub use benthic::*;
 pub use chlorophyll::*;
 pub use co2_air::*;
@@ -22,8 +18,6 @@ pub use dic::*;
 pub use doc::*;
 pub use dom::*;
 pub use field_data::*;
-pub use ions::*;
-pub use isotopes::*;
 pub use nutrients::*;
 pub use pco2::*;
 pub use tss_afdm::*;

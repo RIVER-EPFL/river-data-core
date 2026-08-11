@@ -1,6 +1,6 @@
 [package]
 name = "river-data-core"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.95"
 description = "Common types & traits for the in the river-data platform"
@@ -8,6 +8,8 @@ license = "MIT"
 repository = "https://github.com/RIVER-EPFL/river-data-core"
 keywords = ["sync", "control-plane", "axum", "sea-orm"]
 categories = ["web-programming", "database"]
+# The portal R sources and their generated fixtures are verification inputs, not crate content.
+exclude = ["r_reference/**", "tests/fixtures/**"]
 
 [lints.rust]
 unsafe_code = "forbid"

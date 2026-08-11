@@ -1,18 +1,13 @@
 /// Barometric pressure (hPa) estimated from site altitude and air temperature.
 ///
-/// Uses the barometric formula (approximation of `bigleaf::pressure.from.elevation`):
-///   P = 1013.25 * (1 - 0.0065 * elevation / (temp_c + 273.15 + 0.0065 * elevation))^5.2561
-///
-/// Result is in hPa (the R code multiplies by 10 to convert from kPa, but the
-/// barometric formula already gives hPa when using the standard constants).
+/// From R `calcAlt2BP`: round(bigleaf::pressure.from.elevation(elev, temp) * 10)
+/// where bigleaf computes P = 101.325 / exp(g * elev / (Rd * T_K)) in kPa with
+/// g = 9.81, Rd = 287.0586. R's round() ties to even.
 #[must_use]
 pub fn barometric_pressure_from_altitude(elevation_m: f64, temp_c: f64) -> f64 {
     let temp_k = temp_c + 273.15;
-    let lapse = 0.0065; // K/m
-    let base = 1.0 - lapse * elevation_m / (temp_k + lapse * elevation_m);
-    let pressure_kpa = 101.325 * base.powf(5.2561);
-    // Convert kPa -> hPa (* 10) and round, matching R code: round(bigleaf::pressure.from.elevation(elev, temp) * 10)
-    (pressure_kpa * 10.0).round()
+    let pressure_kpa = 101.325 / (9.81 * elevation_m / (287.0586 * temp_k)).exp();
+    (pressure_kpa * 10.0).round_ties_even()
 }
 
 /// CO2 correction using standard curve + pressure/temperature.
@@ -47,10 +42,10 @@ pub fn reach_depth_stats(depths: &[f64]) -> (f64, f64) {
 /// From R pattern: use field_pressure if it's in [700, 1050] hPa, else fall back to altitude_pressure.
 #[must_use]
 pub fn select_pressure(field_pressure: Option<f64>, altitude_pressure: Option<f64>) -> Option<f64> {
-    if let Some(fp) = field_pressure {
-        if (700.0..=1050.0).contains(&fp) {
-            return Some(fp);
-        }
+    if let Some(fp) = field_pressure
+        && (700.0..=1050.0).contains(&fp)
+    {
+        return Some(fp);
     }
     altitude_pressure
 }
@@ -61,7 +56,6 @@ mod tests {
 
     #[test]
     fn test_barometric_pressure_sea_level() {
-        // At 0m, 15°C => ~1013 hPa
         let result = barometric_pressure_from_altitude(0.0, 15.0);
         assert!(
             (result - 1013.0).abs() < 1.0,
@@ -71,11 +65,11 @@ mod tests {
 
     #[test]
     fn test_barometric_pressure_high_altitude() {
-        // At 2000m, 10°C => roughly 795 hPa
+        // 101.325 / exp(9.81 * 2000 / (287.0586 * 283.15)) * 10 = 796 rounded
         let result = barometric_pressure_from_altitude(2000.0, 10.0);
         assert!(
-            (result - 795.0).abs() < 10.0,
-            "expected ~795 at 2000m, got {result}"
+            (result - 796.0).abs() < 1.0,
+            "expected ~796 at 2000m, got {result}"
         );
     }
 
