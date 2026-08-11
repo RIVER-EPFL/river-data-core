@@ -1,13 +1,13 @@
 [package]
 name = "river-data-core"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.95"
-description = "Common types & traits for the in the river-data platform"
+description = "Client, sync runner, and shared types for the river-data platform"
 license = "MIT"
 repository = "https://github.com/RIVER-EPFL/river-data-core"
-keywords = ["sync", "control-plane", "axum", "sea-orm"]
-categories = ["web-programming", "database"]
+keywords = ["sync", "client", "sensors", "environmental", "control-plane"]
+categories = ["api-bindings", "science"]
 # The portal R sources and their generated fixtures are verification inputs, not crate content.
 exclude = ["r_reference/**", "tests/fixtures/**"]
 
@@ -16,8 +16,15 @@ unsafe_code = "forbid"
 
 [features]
 default = []
-client = ["dep:reqwest"]
-server = ["dep:sea-orm", "dep:axum", "dep:moka", "dep:utoipa"]
+client = [
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:async-trait",
+    "dep:dotenvy",
+    "dep:tracing-subscriber",
+    "tokio/rt-multi-thread",
+]
+server = ["dep:sea-orm", "dep:axum", "dep:moka", "dep:utoipa", "dep:tokio", "dep:sha2", "dep:rand"]
 toolbox = []
 
 [dependencies]
@@ -26,21 +33,35 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.11", features = ["v4", "serde"] }
-tokio = { version = "1.43", features = ["rt", "time", "signal", "sync", "macros"] }
 tracing = "0.1"
 thiserror = "2.0"
-sha2 = "0.10"
-rand = "0.9"
-async-trait = "0.1"
+
+# Client and server
+tokio = { version = "1.43", features = ["rt", "time", "signal", "sync", "macros"], optional = true }
 
 # Client only
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
+async-trait = { version = "0.1", optional = true }
+dotenvy = { version = "0.15", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 
 # Server only
 sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "with-uuid", "with-chrono", "with-json"], optional = true }
 axum = { version = "0.8", optional = true }
 moka = { version = "0.12", features = ["future"], optional = true }
 utoipa = { version = "5.3", features = ["chrono", "uuid"], optional = true }
+sha2 = { version = "0.10", optional = true }
+rand = { version = "0.9", optional = true }
 
 [dev-dependencies]
 http = "1.0"
+tokio = { version = "1.43", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"
+
+[[example]]
+name = "minimal_backend"
+required-features = ["client"]
+
+[[example]]
+name = "csv_folder"
+required-features = ["client"]

@@ -1,44 +1,151 @@
 # river-data-core
 
-Shared library for the [river-data](https://github.com/RIVER-EPFL) platform: sync protocol, control plane types, and data toolbox.
+**Feed your instrument or spreadsheet data into river-data by implementing two functions.**
 
-- [river-data-api](https://github.com/RIVER-EPFL/river-data-api), [river-data-ui](https://github.com/RIVER-EPFL/river-data-ui)
-- [river-data-vaisala](https://github.com/RIVER-EPFL/river-data-vaisala), [river-data-rshiny](https://github.com/RIVER-EPFL/river-data-rshiny)
+river-data-core is the shared library for the [river-data](https://github.com/RIVER-EPFL)
+platform: the sync client, the control plane server handlers, and the RIVER lab toolbox.
+A sync service built on it registers its data streams once, then pushes new readings on a
+schedule. Enrollment, heartbeats, retries, token rotation, batching and remote commands
+(pause, resume, trigger a full sync from the dashboard) are all handled for you.
 
-## Features
+## Install
 
-- **`client`** — sync service HTTP client (reqwest)
-- **`server`** — sync control plane handlers (axum, sea-orm)
-- **`toolbox`** — RIVER lab data toolset
+```toml
+[dependencies]
+river-data-core = { version = "0.6", features = ["client"] }
+```
+
+Common companion crates (`chrono`, `uuid`, `serde_json`, `tracing`, `async_trait`) are
+re-exported at the crate root, so one dependency is enough to start.
+
+## Quick start
+
+A sync service answers two questions about your data source: what streams exist, and what
+new readings arrived since the last sync. You answer them by implementing the
+`SourceBackend` trait. The full program below pushes a synthetic temperature signal; it is
+[examples/minimal_backend.rs](examples/minimal_backend.rs) in this repository.
+
+First, describe your streams. A stream is one series of readings, ie. one column of a
+spreadsheet or one sensor channel:
+
+```rust
+async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError> {
+    Ok(vec![StreamDescriptor {
+        source_key: "demo-temperature".to_string(),
+        source_name: "Demo Temperature".to_string(),
+        source_path: "demo/lab/temperature".to_string(),
+        metadata: json!({ "units": "degC" }),
+        measurement_type: Some("continuous".to_string()),
+    }])
+}
+```
+
+`source_key` is the stable identifier on your side (a column name, a location id).
+`measurement_type` is `"continuous"` for logger data or `"spot"` for grab samples.
+
+Second, fetch new readings. Each request carries `since`, the time of the newest reading
+river-data already has for that stream, so you only return what is new:
+
+```rust
+async fn fetch_readings(
+    &self,
+    requests: &[StreamFetchRequest],
+) -> Result<Vec<StreamReadings>, BackendError> {
+    let mut out = Vec::new();
+    for req in requests {
+        let readings = my_rows_newer_than(req.since)   // your data access goes here
+            .map(|(time, value)| IngestReading::new(time, value))
+            .collect();
+        out.push(StreamReadings {
+            stream_id: req.stream_id,
+            source_key: req.source_key.clone(),
+            readings,
+        });
+    }
+    Ok(out)
+}
+```
+
+Third, run it:
+
+```rust
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    run_sync_service(|_config| async { Ok(Box::new(DemoBackend) as Box<dyn SourceBackend>) })
+}
+```
+
+Ask a river-data administrator to create sync credentials for you (Sync Services page in
+the dashboard), then set three environment variables and start the service:
+
+```bash
+export API_BASE_URL=https://river-data.example.org
+export SERVICE_CLIENT_ID=svc_demo
+export SERVICE_CLIENT_SECRET=your-secret
+cargo run --example minimal_backend --features client
+```
+
+The service enrolls itself on startup, syncs every five minutes, and shows up on the
+dashboard with its status and per-cycle event log.
+
+## Usage
+
+**Cursors and full syncs.** On the first sync `since` is `None`: return your full history
+(or a sensible window). After that, `since` is the newest ingested reading per stream.
+A full sync (triggered from the dashboard) passes `None` again; re-sent readings are
+deduplicated server-side, so returning overlap is safe.
+
+**Reading files.** [examples/csv_folder.rs](examples/csv_folder.rs) syncs a folder of
+`time,value` CSV files, one stream per file (useful as a template for lab exports).
+
+**Status events.** Override `fetch_status_events` to report device telemetry (battery,
+signal, reachability) alongside readings. The default reports nothing.
+
+**Custom commands.** Override `handle_command` to react to commands sent from the
+dashboard beyond the built-in sync/pause/resume set.
+
+**Real services.** [river-data-vaisala](https://github.com/RIVER-EPFL/river-data-vaisala)
+is an HTTP source with status events;
+[river-data-rshiny](https://github.com/RIVER-EPFL/river-data-rshiny) reads three MySQL
+portal schemas behind one binary. Both are under 900 lines.
+
+**Full control.** If the driver's cycle does not fit your source, implement the
+`SyncService` trait instead and drive `SyncServiceRunner` from your own `main`.
+
+## Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `API_BASE_URL` | river-data API URL | required |
+| `SERVICE_CLIENT_ID` | Enrollment client id | required |
+| `SERVICE_CLIENT_SECRET` | Enrollment client secret | required |
+| `INSTANCE_ID` | Distinguishes multiple instances of one service | `default` |
+| `SYNC_INTERVAL_SECONDS` | Time between sync cycles | `300` |
+| `HEARTBEAT_INTERVAL_SECONDS` | Time between heartbeats | `30` |
+| `ENROLLMENT_RETRY_SECONDS` | Wait between enrollment attempts | `10` |
+| `RETRY_MAX` | Attempts per readings sync | `3` |
+| `RETRY_DELAY_SECONDS` | Wait between attempts | `60` |
+| `RUST_LOG` | Log filter | `info` |
+
+Variables are also read from a `.env` file in the working directory.
 
 ## Toolbox
 
-Rust implementations of calculation functions originally written in R. Each function is tested against the original R output using 12,500+ bulk random cases to ensure numerical equivalency.
-
-### Running tests
-
-```bash
-cargo test --features toolbox                        # all tests (unit + golden)
-cargo test --features toolbox --test toolbox_golden   # golden value tests only
-cargo test --features toolbox --lib                   # unit tests only
-```
-
-### Regenerating R fixtures
+Rust ports of the RIVER lab calculation functions originally written in R, gated behind
+the `toolbox` feature. Each function is tested against the original R output (12,500+
+bulk random cases).
 
 ```bash
-Rscript r_reference/generate_fixtures.R
+cargo test --features toolbox                         # all tests (unit + golden)
+Rscript r_reference/generate_fixtures.R               # regenerate fixtures (R >= 4.0, jsonlite)
+Rscript r_reference/verify_integrity.R <portal_source.R>   # verify R sources are byte-exact copies
 ```
 
-Produces `tests/fixtures/golden_values.json`. Deterministic output via `set.seed(42)`. Requires R >= 4.0 and `jsonlite`.
+## Features
 
-### Verifying R reference integrity
+- `client`: sync service runner, driver and HTTP client (reqwest)
+- `server`: sync control plane handlers (axum, sea-orm)
+- `toolbox`: RIVER lab data toolset
 
-```bash
-Rscript r_reference/verify_integrity.R <path_to_calculation_functions.R>
-```
+## License
 
-Proves each file in `r_reference/functions/` is a byte-exact copy of the portal source.
-
-### Adding a new function
-
-To port an R function to Rust, add the original R code as a new file in `r_reference/functions/` with source attribution, add test cases to `r_reference/generate_fixtures.R`, and submit a PR to [@evanjt](https://github.com/evanjt).
+MIT

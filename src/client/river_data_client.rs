@@ -3,13 +3,23 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::error::RiverDataClientError;
-use crate::models::{DataStream, IngestReading, IngestStatusEvent, RegisterStreamRequest};
+use crate::models::{
+    CommandStatus, DataStream, IngestReading, IngestStatusEvent, RegisterStreamRequest,
+    SyncEventCreate, SyncEventRef, SyncEventUpdate,
+};
 
 pub struct RiverDataClient {
     http_client: Client,
     base_url: String,
     path_prefix: String,
     token: std::sync::RwLock<String>,
+}
+
+/// Outcome of a chunked ingest.
+#[derive(Debug, Default)]
+pub struct BatchedIngest {
+    pub inserted: u64,
+    pub failed_batches: usize,
 }
 
 impl RiverDataClient {
@@ -206,6 +216,27 @@ impl RiverDataClient {
         Ok(result.inserted)
     }
 
+    /// Chunked ingest. A failed batch is logged and counted, not fatal, so one
+    /// bad chunk cannot drop the rest of a stream's readings.
+    pub async fn ingest_readings_batched(
+        &self,
+        stream_id: Uuid,
+        readings: &[IngestReading],
+        batch_size: usize,
+    ) -> BatchedIngest {
+        let mut result = BatchedIngest::default();
+        for chunk in readings.chunks(batch_size.max(1)) {
+            match self.ingest_readings(stream_id, chunk).await {
+                Ok(inserted) => result.inserted += inserted,
+                Err(e) => {
+                    tracing::warn!(%stream_id, batch_len = chunk.len(), error = %e, "Ingest batch failed");
+                    result.failed_batches += 1;
+                }
+            }
+        }
+        result
+    }
+
     // ========================================================================
     // Actions
     // ========================================================================
@@ -258,10 +289,10 @@ impl RiverDataClient {
     pub async fn update_command(
         &self,
         command_id: Uuid,
-        status: &str,
+        status: CommandStatus,
         result: Option<serde_json::Value>,
     ) -> Result<(), RiverDataClientError> {
-        let body = serde_json::json!({ "status": status, "result": result });
+        let body = serde_json::json!({ "status": status.as_str(), "result": result });
         let resp = self
             .http_client
             .patch(self.url(&format!("/sync/commands/{command_id}")))
@@ -280,8 +311,8 @@ impl RiverDataClient {
 
     pub async fn create_sync_event(
         &self,
-        event: &serde_json::Value,
-    ) -> Result<serde_json::Value, RiverDataClientError> {
+        event: &SyncEventCreate,
+    ) -> Result<SyncEventRef, RiverDataClientError> {
         let resp = self
             .http_client
             .post(self.url("/sync/events"))
@@ -299,7 +330,7 @@ impl RiverDataClient {
     pub async fn update_sync_event(
         &self,
         event_id: Uuid,
-        update: &serde_json::Value,
+        update: &SyncEventUpdate,
     ) -> Result<(), RiverDataClientError> {
         let resp = self
             .http_client

@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::error::ControlPlaneError;
 use crate::models::{
-    CommandUpdateRequest, EnrollRequest, EnrollResponse, HeartbeatRequest, HeartbeatResponse,
+    EnrollRequest, EnrollResponse, HeartbeatRequest, HeartbeatResponse, ServiceStatus,
 };
 
 pub struct ControlPlaneClient {
@@ -89,12 +89,12 @@ impl ControlPlaneClient {
     pub async fn heartbeat(
         &mut self,
         service_id: Uuid,
-        status: &str,
+        status: ServiceStatus,
         current_operation: Option<&str>,
     ) -> Result<HeartbeatResponse, ControlPlaneError> {
         let req = HeartbeatRequest {
             service_id,
-            status: status.to_string(),
+            status: status.as_str().to_string(),
             current_operation: current_operation.map(String::from),
         };
 
@@ -126,39 +126,6 @@ impl ControlPlaneClient {
         Ok(hb_resp)
     }
 
-    pub async fn update_command(
-        &self,
-        command_id: Uuid,
-        status: &str,
-        result: Option<serde_json::Value>,
-    ) -> Result<(), ControlPlaneError> {
-        let req = CommandUpdateRequest {
-            status: status.to_string(),
-            result,
-        };
-
-        let mut builder = self
-            .http
-            .patch(self.service_url(&format!("/commands/{command_id}")));
-        if let Some(token) = &self.session_token {
-            builder = builder.bearer_auth(token);
-        }
-
-        let resp = builder.json(&req).send().await?;
-
-        let http_status = resp.status();
-        if !http_status.is_success() {
-            let url = resp.url().to_string();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(ControlPlaneError::Api {
-                status: http_status.as_u16(),
-                url,
-                body,
-            });
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]

@@ -20,6 +20,24 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
 
+  features:
+    name: Feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check no features
+        run: cargo check --no-default-features
+      - name: Check client
+        run: cargo check --features client
+      - name: Check server
+        run: cargo check --features server
+      - name: Check toolbox
+        run: cargo check --features toolbox
+      - name: Build examples
+        run: cargo build --examples --features client
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

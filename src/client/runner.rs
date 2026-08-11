@@ -1,35 +1,19 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 
 use crate::client::control_plane::ControlPlaneClient;
-use crate::client::river_data_client::RiverDataClient;
+use crate::client::service::SyncService;
 use crate::commands;
 use crate::error::ControlPlaneError;
-use crate::models::{PendingCommand, RunnerConfig, ServiceStatus, SyncEventType, SyncEventStatus, SyncResult, SyncTrigger};
+use crate::models::{
+    CommandStatus, PendingCommand, RunnerConfig, ServiceStatus, SyncEventCreate, SyncEventStatus,
+    SyncEventType, SyncEventUpdate, SyncResult, SyncTrigger,
+};
 
-#[async_trait::async_trait]
-pub trait SyncService: Send + Sync + 'static {
-    fn service_type(&self) -> &str;
-
-    async fn sync(&self, full: bool) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>>;
-
-    async fn handle_command(
-        &self,
-        command: &str,
-        _payload: Option<serde_json::Value>,
-    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-        Err(format!("Unknown command: {command}").into())
-    }
-
-    fn update_token(&self, token: &str);
-
-    fn river_data_client(&self) -> Option<&RiverDataClient> {
-        None
-    }
-}
+type SharedServiceId = Arc<RwLock<Uuid>>;
 
 pub struct SyncServiceRunner<S: SyncService> {
     service: Arc<S>,
@@ -74,9 +58,9 @@ impl<S: SyncService> SyncServiceRunner<S> {
             }
         };
 
-        let service_id = enroll_resp.service_id;
+        let service_id: SharedServiceId = Arc::new(RwLock::new(enroll_resp.service_id));
         self.service.update_token(&enroll_resp.session_token);
-        tracing::info!(%service_id, "Enrolled successfully");
+        tracing::info!(service_id = %enroll_resp.service_id, "Enrolled successfully");
 
         let (pause_tx, pause_rx) = watch::channel(false);
         let (sync_tx, sync_rx) = mpsc::channel::<SyncTrigger>(16);
@@ -89,11 +73,12 @@ impl<S: SyncService> SyncServiceRunner<S> {
         let hb_config = self.config.clone();
         let hb_sync_tx = sync_tx.clone();
         let hb_pause_tx = pause_tx.clone();
+        let hb_service_id = service_id.clone();
 
         let heartbeat_handle = tokio::spawn(async move {
             Self::heartbeat_loop(
                 client,
-                service_id,
+                hb_service_id,
                 hb_config,
                 hb_service,
                 hb_sync_tx,
@@ -134,7 +119,7 @@ impl<S: SyncService> SyncServiceRunner<S> {
 
     async fn heartbeat_loop(
         mut client: ControlPlaneClient,
-        service_id: Uuid,
+        service_id: SharedServiceId,
         config: RunnerConfig,
         service: Arc<S>,
         sync_tx: mpsc::Sender<SyncTrigger>,
@@ -143,7 +128,6 @@ impl<S: SyncService> SyncServiceRunner<S> {
     ) {
         let mut interval =
             tokio::time::interval(Duration::from_secs(config.heartbeat_interval_secs));
-        interval.tick().await;
 
         loop {
             interval.tick().await;
@@ -152,40 +136,33 @@ impl<S: SyncService> SyncServiceRunner<S> {
             let current_op = current_op_rx.borrow().clone();
 
             let status = if is_paused {
-                ServiceStatus::Paused.as_str()
+                ServiceStatus::Paused
             } else if current_op.is_some() {
-                ServiceStatus::Syncing.as_str()
+                ServiceStatus::Syncing
             } else {
-                ServiceStatus::Idle.as_str()
+                ServiceStatus::Idle
             };
 
-            match client
-                .heartbeat(service_id, status, current_op.as_deref())
-                .await
-            {
+            let id = *service_id.read().expect("service_id lock poisoned");
+            match client.heartbeat(id, status, current_op.as_deref()).await {
                 Ok(resp) => {
                     service.update_token(&resp.session_token);
 
                     for cmd in resp.pending_commands {
-                        Self::handle_command(
-                            &client,
-                            &service,
-                            cmd,
-                            &sync_tx,
-                            &pause_tx,
-                        )
-                        .await;
+                        Self::handle_command(&service, cmd, &sync_tx, &pause_tx).await;
                     }
                 }
                 Err(ControlPlaneError::CredentialsRevoked) => {
-                    tracing::error!("Credentials revoked — attempting re-enrollment");
+                    tracing::error!("Credentials revoked, attempting re-enrollment");
                     match client
                         .enroll(&config.client_id, &config.client_secret, &config.instance_id)
                         .await
                     {
                         Ok(resp) => {
+                            *service_id.write().expect("service_id lock poisoned") =
+                                resp.service_id;
                             service.update_token(&resp.session_token);
-                            tracing::info!("Re-enrolled successfully");
+                            tracing::info!(service_id = %resp.service_id, "Re-enrolled successfully");
                         }
                         Err(e) => {
                             tracing::error!(error = %e, "Re-enrollment failed");
@@ -200,7 +177,6 @@ impl<S: SyncService> SyncServiceRunner<S> {
     }
 
     async fn handle_command(
-        client: &ControlPlaneClient,
         service: &Arc<S>,
         cmd: PendingCommand,
         sync_tx: &mpsc::Sender<SyncTrigger>,
@@ -208,9 +184,12 @@ impl<S: SyncService> SyncServiceRunner<S> {
     ) {
         tracing::info!(command = %cmd.command, id = %cmd.id, "Received command");
 
-        let _ = client
-            .update_command(cmd.id, "acknowledged", None)
-            .await;
+        let api = service.river_data_client();
+        if let Some(api) = api {
+            let _ = api
+                .update_command(cmd.id, CommandStatus::Acknowledged, None)
+                .await;
+        }
 
         match cmd.command.as_str() {
             commands::TRIGGER_SYNC => {
@@ -231,40 +210,45 @@ impl<S: SyncService> SyncServiceRunner<S> {
             }
             commands::PAUSE => {
                 let _ = pause_tx.send(true);
-                let _ = client
-                    .update_command(
-                        cmd.id,
-                        "completed",
-                        Some(serde_json::json!({"paused": true})),
-                    )
-                    .await;
+                if let Some(api) = api {
+                    let _ = api
+                        .update_command(
+                            cmd.id,
+                            CommandStatus::Completed,
+                            Some(serde_json::json!({"paused": true})),
+                        )
+                        .await;
+                }
             }
             commands::RESUME => {
                 let _ = pause_tx.send(false);
-                let _ = client
-                    .update_command(
-                        cmd.id,
-                        "completed",
-                        Some(serde_json::json!({"resumed": true})),
-                    )
-                    .await;
+                if let Some(api) = api {
+                    let _ = api
+                        .update_command(
+                            cmd.id,
+                            CommandStatus::Completed,
+                            Some(serde_json::json!({"resumed": true})),
+                        )
+                        .await;
+                }
             }
             other => {
-                match service.handle_command(other, cmd.payload).await {
-                    Ok(result) => {
-                        let _ = client
-                            .update_command(cmd.id, "completed", Some(result))
-                            .await;
-                    }
-                    Err(e) => {
-                        let _ = client
-                            .update_command(
+                let outcome = service.handle_command(other, cmd.payload).await;
+                if let Some(api) = api {
+                    let _ = match outcome {
+                        Ok(result) => {
+                            api.update_command(cmd.id, CommandStatus::Completed, Some(result))
+                                .await
+                        }
+                        Err(e) => {
+                            api.update_command(
                                 cmd.id,
-                                "failed",
+                                CommandStatus::Failed,
                                 Some(serde_json::json!({"error": e.to_string()})),
                             )
-                            .await;
-                    }
+                            .await
+                        }
+                    };
                 }
             }
         }
@@ -272,7 +256,7 @@ impl<S: SyncService> SyncServiceRunner<S> {
 
     async fn sync_loop(
         service: Arc<S>,
-        service_id: Uuid,
+        service_id: SharedServiceId,
         sync_interval_secs: u64,
         pause_rx: watch::Receiver<bool>,
         mut sync_rx: mpsc::Receiver<SyncTrigger>,
@@ -301,28 +285,23 @@ impl<S: SyncService> SyncServiceRunner<S> {
             let start = Instant::now();
 
             let event_type = match &trigger {
-                SyncTrigger::Command { full: true, .. } => SyncEventType::FullSync.as_str(),
-                SyncTrigger::Command { full: false, .. } => SyncEventType::Triggered.as_str(),
-                SyncTrigger::Scheduled => SyncEventType::Scheduled.as_str(),
+                SyncTrigger::Command { full: true, .. } => SyncEventType::FullSync,
+                SyncTrigger::Command { full: false, .. } => SyncEventType::Triggered,
+                SyncTrigger::Scheduled => SyncEventType::Scheduled,
             };
 
             let op_label = if full { "Full Sync" } else { "Syncing" };
             let _ = current_op_tx.send(Some(op_label.to_string()));
 
             let event_id = if let Some(api) = service.river_data_client() {
-                match api
-                    .create_sync_event(&serde_json::json!({
-                        "service_id": service_id,
-                        "command_id": command_id,
-                        "event_type": event_type,
-                        "status": SyncEventStatus::Running.as_str(),
-                    }))
-                    .await
-                {
-                    Ok(ev) => ev
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .and_then(|s| Uuid::parse_str(s).ok()),
+                let event = SyncEventCreate {
+                    service_id: *service_id.read().expect("service_id lock poisoned"),
+                    command_id,
+                    event_type,
+                    status: SyncEventStatus::Running,
+                };
+                match api.create_sync_event(&event).await {
+                    Ok(ev) => Some(ev.id),
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to create sync event");
                         None
@@ -332,52 +311,43 @@ impl<S: SyncService> SyncServiceRunner<S> {
                 None
             };
 
-            let result = service.sync(full).await;
+            let mut result = service.sync(full).await;
 
             let _ = current_op_tx.send(None);
 
+            if let Ok(r) = &mut result {
+                r.full_sync = full;
+                r.duration_ms = start.elapsed().as_millis() as u64;
+            }
+
             if let (Some(eid), Some(api)) = (event_id, service.river_data_client()) {
-                match &result {
-                    Ok(r) => {
-                        let status = if r.errors.is_empty() {
-                            SyncEventStatus::Completed.as_str()
+                let update = match &result {
+                    Ok(r) => SyncEventUpdate {
+                        status: Some(if r.errors.is_empty() {
+                            SyncEventStatus::Completed
                         } else {
-                            SyncEventStatus::Partial.as_str()
-                        };
-                        let _ = api
-                            .update_sync_event(
-                                eid,
-                                &serde_json::json!({
-                                    "status": status,
-                                    "readings_synced": r.readings_synced,
-                                    "status_events_synced": r.status_events_synced,
-                                    "errors": r.errors,
-                                    "log": r.log,
-                                    "duration_ms": r.duration_ms,
-                                }),
-                            )
-                            .await;
-                    }
-                    Err(e) => {
-                        let duration_ms = start.elapsed().as_millis() as u64;
-                        let _ = api
-                            .update_sync_event(
-                                eid,
-                                &serde_json::json!({
-                                    "status": SyncEventStatus::Failed.as_str(),
-                                    "errors": [e.to_string()],
-                                    "duration_ms": duration_ms,
-                                }),
-                            )
-                            .await;
-                    }
-                }
+                            SyncEventStatus::Partial
+                        }),
+                        readings_synced: Some(r.readings_synced),
+                        status_events_synced: Some(r.status_events_synced),
+                        errors: r.errors.clone(),
+                        log: r.log.clone(),
+                        duration_ms: Some(r.duration_ms),
+                    },
+                    Err(e) => SyncEventUpdate {
+                        status: Some(SyncEventStatus::Failed),
+                        errors: vec![e.to_string()],
+                        duration_ms: Some(start.elapsed().as_millis() as u64),
+                        ..Default::default()
+                    },
+                };
+                let _ = api.update_sync_event(eid, &update).await;
             }
 
             if let (Some(cmd_id), Some(api)) = (command_id, service.river_data_client()) {
                 let (cmd_status, result_json) = match &result {
                     Ok(r) => (
-                        "completed",
+                        CommandStatus::Completed,
                         serde_json::json!({
                             "readings_synced": r.readings_synced,
                             "status_events_synced": r.status_events_synced,
@@ -385,36 +355,37 @@ impl<S: SyncService> SyncServiceRunner<S> {
                             "duration_ms": r.duration_ms,
                         }),
                     ),
-                    Err(e) => {
-                        let duration_ms = start.elapsed().as_millis() as u64;
-                        (
-                            "failed",
-                            serde_json::json!({
-                                "error": e.to_string(),
-                                "duration_ms": duration_ms,
-                            }),
-                        )
-                    }
+                    Err(e) => (
+                        CommandStatus::Failed,
+                        serde_json::json!({
+                            "error": e.to_string(),
+                            "duration_ms": start.elapsed().as_millis() as u64,
+                        }),
+                    ),
                 };
                 if let Err(e) = api.update_command(cmd_id, cmd_status, Some(result_json)).await {
                     tracing::warn!(error = %e, "Failed to update command status");
                 }
             }
 
-            match &result {
-                Ok(r) => {
-                    tracing::info!(
-                        readings = r.readings_synced,
-                        status_events = r.status_events_synced,
-                        full = r.full_sync,
-                        duration_ms = r.duration_ms,
-                        errors = r.errors.len(),
-                        "Sync completed"
-                    );
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "Sync failed");
-                }
+            Self::log_outcome(&result);
+        }
+    }
+
+    fn log_outcome(result: &Result<SyncResult, Box<dyn std::error::Error + Send + Sync>>) {
+        match result {
+            Ok(r) => {
+                tracing::info!(
+                    readings = r.readings_synced,
+                    status_events = r.status_events_synced,
+                    full = r.full_sync,
+                    duration_ms = r.duration_ms,
+                    errors = r.errors.len(),
+                    "Sync completed"
+                );
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Sync failed");
             }
         }
     }
