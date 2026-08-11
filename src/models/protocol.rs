@@ -16,6 +16,10 @@ pub struct EnrollRequest {
 pub struct EnrollResponse {
     pub service_id: Uuid,
     pub session_token: String,
+    /// Operator-desired pause state, persisted server-side; honored before the
+    /// initial sync so a restart cannot undo a pause.
+    #[serde(default)]
+    pub paused: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,6 +35,9 @@ pub struct HeartbeatRequest {
 pub struct HeartbeatResponse {
     pub session_token: String,
     pub pending_commands: Vec<PendingCommand>,
+    /// Operator-desired pause state, persisted server-side.
+    #[serde(default)]
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

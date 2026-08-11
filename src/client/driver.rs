@@ -11,6 +11,15 @@ pub const INGEST_BATCH_SIZE: usize = 1000;
 /// Sync-event log lines per cycle; further per-stream detail goes to debug logging.
 const MAX_LOG_LINES: usize = 50;
 
+/// Bound a line collection to MAX_LOG_LINES with a count of what was dropped.
+fn cap_lines(lines: &mut Vec<String>) {
+    if lines.len() > MAX_LOG_LINES {
+        let dropped = lines.len() - MAX_LOG_LINES;
+        lines.truncate(MAX_LOG_LINES);
+        lines.push(format!("... and {dropped} more"));
+    }
+}
+
 /// Drives a `SourceBackend` through the full sync cycle: stream registration,
 /// cursor tracking, batched ingest, aggregate refresh and status events.
 pub struct SyncDriver {
@@ -24,6 +33,7 @@ pub struct SyncDriver {
 struct ReadingsOutcome {
     streams: Vec<DataStream>,
     readings_synced: u64,
+    streams_with_data: usize,
     log: Vec<String>,
     errors: Vec<String>,
 }
@@ -68,7 +78,11 @@ impl SyncDriver {
             }
         }
 
-        self.discovered.store(true, Ordering::Relaxed);
+        // Only latch when every descriptor registered; a partial pass (API
+        // outage mid-registration) must be retried on the next cycle.
+        if registered == descriptors.len() {
+            self.discovered.store(true, Ordering::Relaxed);
+        }
         result.log.push(format!("Stream discovery: {registered} streams registered"));
     }
 
@@ -97,6 +111,7 @@ impl SyncDriver {
         let mut outcome = ReadingsOutcome {
             streams,
             readings_synced: 0,
+            streams_with_data: 0,
             log: Vec::new(),
             errors: Vec::new(),
         };
@@ -111,11 +126,13 @@ impl SyncDriver {
                 .await;
             outcome.readings_synced += batch.inserted;
             if batch.failed_batches > 0 {
-                outcome
-                    .errors
-                    .push(format!("{}: {} ingest batches failed", sr.source_key, batch.failed_batches));
+                outcome.errors.push(format!(
+                    "{}: ingest failed, {} readings deferred to next cycle",
+                    sr.source_key, batch.deferred
+                ));
             }
             if batch.inserted > 0 {
+                outcome.streams_with_data += 1;
                 if outcome.log.len() < MAX_LOG_LINES {
                     outcome
                         .log
@@ -129,15 +146,17 @@ impl SyncDriver {
         Ok(outcome)
     }
 
-    /// `retry_max` counts total attempts, matching the RETRY_MAX env semantics.
-    async fn sync_readings(&self, full: bool) -> Result<ReadingsOutcome, String> {
-        let mut attempt = 1u32;
+    /// `retry_max` counts retries after the first attempt, matching the
+    /// deployed RETRY_MAX semantics (RETRY_MAX=3 means up to 4 attempts).
+    /// Returns the outcome plus the number of retries used.
+    async fn sync_readings(&self, full: bool) -> Result<(ReadingsOutcome, u32), String> {
+        let mut retries = 0u32;
         loop {
             match self.sync_readings_once(full).await {
-                Ok(outcome) => return Ok(outcome),
-                Err(e) if attempt < self.retry_max => {
-                    tracing::warn!(attempt, max = self.retry_max, error = %e, "Readings sync failed, retrying");
-                    attempt += 1;
+                Ok(outcome) => return Ok((outcome, retries)),
+                Err(e) if retries < self.retry_max => {
+                    retries += 1;
+                    tracing::warn!(retry = retries, max = self.retry_max, error = %e, "Readings sync failed, retrying");
                     tokio::time::sleep(Duration::from_secs(self.retry_delay_secs)).await;
                 }
                 Err(e) => return Err(e),
@@ -177,14 +196,40 @@ impl SyncService for SyncDriver {
     async fn sync(&self, full: bool) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
         let mut result = SyncResult::default();
 
-        if full || !self.discovered.load(Ordering::Relaxed) {
+        if full
+            || !self.discovered.load(Ordering::Relaxed)
+            || self.backend.rediscover_every_cycle()
+        {
             self.discover(&mut result).await;
         }
 
-        let outcome = self.sync_readings(full).await.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
-        result.readings_synced = outcome.readings_synced;
-        result.log.extend(outcome.log);
-        result.errors.extend(outcome.errors);
+        let readings = self.sync_readings(full).await;
+
+        let outcome = match readings {
+            Ok((outcome, retries)) => {
+                result.readings_synced = outcome.readings_synced;
+                result.log.push(format!(
+                    "Readings sync: {} readings across {} streams ({} retries)",
+                    outcome.readings_synced, outcome.streams_with_data, retries
+                ));
+                result.log.extend(outcome.log);
+                result.errors.extend(outcome.errors);
+                Some(outcome.streams)
+            }
+            Err(e) => {
+                // Device health must keep flowing during a readings outage;
+                // run the status phase before reporting the failure.
+                let streams = self
+                    .api
+                    .list_streams(Some(self.backend.source_system()), Some(true))
+                    .await
+                    .unwrap_or_default();
+                if !streams.is_empty() {
+                    self.sync_status_events(&streams, &mut result).await;
+                }
+                return Err(e.into());
+            }
+        };
 
         if result.readings_synced > 0
             && let Err(e) = self.api.refresh_aggregates(full).await
@@ -193,8 +238,11 @@ impl SyncService for SyncDriver {
             result.errors.push(format!("Aggregate refresh: {e}"));
         }
 
-        self.sync_status_events(&outcome.streams, &mut result).await;
+        if let Some(streams) = &outcome {
+            self.sync_status_events(streams, &mut result).await;
+        }
 
+        cap_lines(&mut result.errors);
         Ok(result)
     }
 

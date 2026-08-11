@@ -14,6 +14,31 @@ use crate::models::{
 };
 
 type SharedServiceId = Arc<RwLock<Uuid>>;
+type ActiveEvent = Arc<RwLock<Option<Uuid>>>;
+
+/// Resolves on SIGINT, and on SIGTERM where available (kubernetes pod
+/// termination sends SIGTERM first).
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(error = %e, "SIGTERM handler unavailable, listening for SIGINT only");
+                let _ = tokio::signal::ctrl_c().await;
+                return;
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
 
 pub struct SyncServiceRunner<S: SyncService> {
     service: Arc<S>,
@@ -30,6 +55,12 @@ impl<S: SyncService> SyncServiceRunner<S> {
 
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut client = ControlPlaneClient::new(&self.config.api_base_url)?;
+
+        if self.service.river_data_client().is_none() {
+            tracing::warn!(
+                "SyncService::river_data_client() is None: command acknowledgements and sync event reporting are disabled"
+            );
+        }
 
         tracing::info!(
             client_id = %self.config.client_id,
@@ -62,9 +93,15 @@ impl<S: SyncService> SyncServiceRunner<S> {
         self.service.update_token(&enroll_resp.session_token);
         tracing::info!(service_id = %enroll_resp.service_id, "Enrolled successfully");
 
-        let (pause_tx, pause_rx) = watch::channel(false);
+        // Seed from the server-persisted pause state so a restart cannot undo
+        // an operator's pause.
+        if enroll_resp.paused {
+            tracing::info!("Service is paused server-side; scheduled syncs disabled until resumed");
+        }
+        let (pause_tx, pause_rx) = watch::channel(enroll_resp.paused);
         let (sync_tx, sync_rx) = mpsc::channel::<SyncTrigger>(16);
         let (current_op_tx, current_op_rx) = watch::channel::<Option<String>>(None);
+        let active_event: ActiveEvent = Arc::new(RwLock::new(None));
 
         let _ = sync_tx.send(SyncTrigger::Scheduled).await;
         tracing::info!("Queued initial sync after enrollment");
@@ -90,6 +127,7 @@ impl<S: SyncService> SyncServiceRunner<S> {
 
         let sync_service = self.service.clone();
         let sync_interval = self.config.sync_interval_secs;
+        let sync_active_event = active_event.clone();
         let sync_handle = tokio::spawn(async move {
             Self::sync_loop(
                 sync_service,
@@ -98,13 +136,25 @@ impl<S: SyncService> SyncServiceRunner<S> {
                 pause_rx,
                 sync_rx,
                 current_op_tx,
+                sync_active_event,
             )
             .await;
         });
 
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
+            _ = shutdown_signal() => {
                 tracing::info!("Received shutdown signal");
+                let in_flight = *active_event.read().expect("active_event lock poisoned");
+                if let (Some(eid), Some(api)) = (in_flight, self.service.river_data_client()) {
+                    let update = SyncEventUpdate {
+                        status: Some(SyncEventStatus::Failed),
+                        errors: vec!["Service shut down mid-sync".to_string()],
+                        ..Default::default()
+                    };
+                    if let Err(e) = api.update_sync_event(eid, &update).await {
+                        tracing::warn!(error = %e, "Failed to close in-flight sync event on shutdown");
+                    }
+                }
             }
             _ = heartbeat_handle => {
                 tracing::error!("Heartbeat loop exited unexpectedly");
@@ -128,6 +178,7 @@ impl<S: SyncService> SyncServiceRunner<S> {
     ) {
         let mut interval =
             tokio::time::interval(Duration::from_secs(config.heartbeat_interval_secs));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
             interval.tick().await;
@@ -148,6 +199,11 @@ impl<S: SyncService> SyncServiceRunner<S> {
                 Ok(resp) => {
                     service.update_token(&resp.session_token);
 
+                    if *pause_tx.borrow() != resp.paused {
+                        tracing::info!(paused = resp.paused, "Pause state reconciled from server");
+                        let _ = pause_tx.send(resp.paused);
+                    }
+
                     for cmd in resp.pending_commands {
                         Self::handle_command(&service, cmd, &sync_tx, &pause_tx).await;
                     }
@@ -162,6 +218,7 @@ impl<S: SyncService> SyncServiceRunner<S> {
                             *service_id.write().expect("service_id lock poisoned") =
                                 resp.service_id;
                             service.update_token(&resp.session_token);
+                            let _ = pause_tx.send(resp.paused);
                             tracing::info!(service_id = %resp.service_id, "Re-enrolled successfully");
                         }
                         Err(e) => {
@@ -261,8 +318,10 @@ impl<S: SyncService> SyncServiceRunner<S> {
         pause_rx: watch::Receiver<bool>,
         mut sync_rx: mpsc::Receiver<SyncTrigger>,
         current_op_tx: watch::Sender<Option<String>>,
+        active_event: ActiveEvent,
     ) {
         let mut interval = tokio::time::interval(Duration::from_secs(sync_interval_secs));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         interval.tick().await;
 
         loop {
@@ -311,8 +370,11 @@ impl<S: SyncService> SyncServiceRunner<S> {
                 None
             };
 
+            *active_event.write().expect("active_event lock poisoned") = event_id;
+
             let mut result = service.sync(full).await;
 
+            *active_event.write().expect("active_event lock poisoned") = None;
             let _ = current_op_tx.send(None);
 
             if let Ok(r) = &mut result {

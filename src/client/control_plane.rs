@@ -40,10 +40,6 @@ impl ControlPlaneClient {
         self.session_token.as_deref()
     }
 
-    pub fn set_session_token(&mut self, token: String) {
-        self.session_token = Some(token);
-    }
-
     fn service_url(&self, path: &str) -> String {
         format!("{}{}{}", self.base_url, self.path_prefix, path)
     }
@@ -158,17 +154,5 @@ mod tests {
             client.service_url("/heartbeat"),
             "http://api:3000/api/sync/heartbeat"
         );
-    }
-
-    #[test]
-    fn test_session_token_management() {
-        let mut client = ControlPlaneClient::new("http://localhost:3000").unwrap();
-        assert_eq!(client.session_token(), None);
-
-        client.set_session_token("tok-123".to_string());
-        assert_eq!(client.session_token(), Some("tok-123"));
-
-        client.set_session_token("tok-456".to_string());
-        assert_eq!(client.session_token(), Some("tok-456"));
     }
 }

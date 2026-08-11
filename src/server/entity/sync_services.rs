@@ -9,6 +9,8 @@ pub struct Model {
     pub service_type: String,
     pub instance_id: String,
     pub status: String,
+    /// Operator-desired pause state; survives restarts, unlike `status`.
+    pub paused: bool,
     pub current_operation: Option<String>,
     pub last_heartbeat: Option<DateTimeWithTimeZone>,
     pub last_sync_completed_at: Option<DateTimeWithTimeZone>,

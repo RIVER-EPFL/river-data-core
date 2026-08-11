@@ -3,8 +3,6 @@ use crate::env;
 #[derive(Debug, Clone)]
 pub struct SyncServerConfig {
     pub session_token_ttl_secs: u64,
-    pub token_cache_capacity: u64,
-    pub token_cache_ttl_secs: u64,
     pub command_expiry_secs: u64,
     pub health_healthy_secs: i64,
     pub health_warning_secs: i64,
@@ -15,8 +13,6 @@ impl Default for SyncServerConfig {
     fn default() -> Self {
         Self {
             session_token_ttl_secs: 900,
-            token_cache_capacity: 100,
-            token_cache_ttl_secs: 780,
             command_expiry_secs: 300,
             health_healthy_secs: 90,
             health_warning_secs: 300,

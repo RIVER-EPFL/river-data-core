@@ -12,7 +12,7 @@ schedule. Enrollment, heartbeats, retries, token rotation, batching and remote c
 
 ```toml
 [dependencies]
-river-data-core = { version = "0.6", features = ["client"] }
+river-data-core = { version = "0.5", features = ["client"] }
 ```
 
 Common companion crates (`chrono`, `uuid`, `serde_json`, `tracing`, `async_trait`) are
@@ -41,6 +41,7 @@ async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError> 
 ```
 
 `source_key` is the stable identifier on your side (a column name, a location id).
+Keep it stable across restarts: a changed key registers as a new, empty stream.
 `measurement_type` is `"continuous"` for logger data or `"spot"` for grab samples.
 
 Second, fetch new readings. Each request carries `since`, the time of the newest reading
@@ -87,6 +88,12 @@ cargo run --example minimal_backend --features client
 The service enrolls itself on startup, syncs every five minutes, and shows up on the
 dashboard with its status and per-cycle event log.
 
+One step remains before the data appears anywhere: an administrator pairs each new
+stream to a site parameter (Streams page in the dashboard). Until then readings are
+stored but belong to no site, so charts and exports show nothing. Ask for pairing once
+your streams are registered; syncing continues normally either way and the paired
+history is backfilled.
+
 ## Usage
 
 **Cursors and full syncs.** On the first sync `since` is `None`: return your full history
@@ -96,6 +103,7 @@ deduplicated server-side, so returning overlap is safe.
 
 **Reading files.** [examples/csv_folder.rs](examples/csv_folder.rs) syncs a folder of
 `time,value` CSV files, one stream per file (useful as a template for lab exports).
+It reads the folder named by `DATA_DIR` (default `./data`).
 
 **Status events.** Override `fetch_status_events` to report device telemetry (battery,
 signal, reachability) alongside readings. The default reports nothing.
@@ -103,10 +111,9 @@ signal, reachability) alongside readings. The default reports nothing.
 **Custom commands.** Override `handle_command` to react to commands sent from the
 dashboard beyond the built-in sync/pause/resume set.
 
-**Real services.** [river-data-vaisala](https://github.com/RIVER-EPFL/river-data-vaisala)
-is an HTTP source with status events;
-[river-data-rshiny](https://github.com/RIVER-EPFL/river-data-rshiny) reads three MySQL
-portal schemas behind one binary. Both are under 900 lines.
+**Real services.** [river-data-sync-vaisala](https://github.com/RIVER-EPFL/river-data-sync-vaisala)
+is an HTTP source with status events; river-data-rshiny reads three MySQL portal
+schemas behind one binary. Both are under 900 lines.
 
 **Full control.** If the driver's cycle does not fit your source, implement the
 `SyncService` trait instead and drive `SyncServiceRunner` from your own `main`.
@@ -122,7 +129,7 @@ portal schemas behind one binary. Both are under 900 lines.
 | `SYNC_INTERVAL_SECONDS` | Time between sync cycles | `300` |
 | `HEARTBEAT_INTERVAL_SECONDS` | Time between heartbeats | `30` |
 | `ENROLLMENT_RETRY_SECONDS` | Wait between enrollment attempts | `10` |
-| `RETRY_MAX` | Attempts per readings sync | `3` |
+| `RETRY_MAX` | Readings sync retries after the first attempt | `3` |
 | `RETRY_DELAY_SECONDS` | Wait between attempts | `60` |
 | `RUST_LOG` | Log filter | `info` |
 

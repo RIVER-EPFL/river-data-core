@@ -88,20 +88,23 @@ pub async fn enroll<S: SyncState>(
 
     let starting = ServiceStatus::Starting.to_string();
 
-    let service_id = if let Some(existing) = existing {
+    // `paused` deliberately survives re-enrollment: a pod restart must not
+    // undo an operator's pause.
+    let (service_id, paused) = if let Some(existing) = existing {
         let mut active: sync_services::ActiveModel = existing.clone().into();
         active.status = Set(starting);
         active.current_operation = Set(None);
         active.last_error = Set(None);
         active.updated_at = Set(Utc::now().into());
         active.update(state.db()).await?;
-        existing.id
+        (existing.id, existing.paused)
     } else {
         let service = sync_services::ActiveModel {
             id: Set(Uuid::new_v4()),
             service_type: Set(cred.service_type.clone()),
             instance_id: Set(req.instance_id.clone()),
             status: Set(starting),
+            paused: Set(false),
             current_operation: Set(None),
             last_heartbeat: Set(None),
             last_sync_completed_at: Set(None),
@@ -110,7 +113,7 @@ pub async fn enroll<S: SyncState>(
             updated_at: Set(Utc::now().into()),
         };
         let inserted = service.insert(state.db()).await?;
-        inserted.id
+        (inserted.id, false)
     };
 
     if cred.service_id.is_none() {
@@ -127,5 +130,6 @@ pub async fn enroll<S: SyncState>(
     Ok(Json(EnrollResponse {
         service_id,
         session_token,
+        paused,
     }))
 }

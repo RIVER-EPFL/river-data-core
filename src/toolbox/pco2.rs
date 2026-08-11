@@ -43,15 +43,6 @@ impl Default for GasConstants {
     }
 }
 
-/// Result of a pCO2 calculation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PCO2Result {
-    /// CO2 aqueous concentration in µM.
-    pub co2_aq_umol: f64,
-    /// pCO2 in µatm.
-    pub pco2_uatm: f64,
-}
-
 /// CH4 dry concentration corrected for water vapor.
 ///
 /// From R `calcCH4dry`:

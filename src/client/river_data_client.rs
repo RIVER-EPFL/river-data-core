@@ -20,6 +20,8 @@ pub struct RiverDataClient {
 pub struct BatchedIngest {
     pub inserted: u64,
     pub failed_batches: usize,
+    /// Readings not attempted because an earlier batch failed.
+    pub deferred: usize,
 }
 
 impl RiverDataClient {
@@ -216,8 +218,11 @@ impl RiverDataClient {
         Ok(result.inserted)
     }
 
-    /// Chunked ingest. A failed batch is logged and counted, not fatal, so one
-    /// bad chunk cannot drop the rest of a stream's readings.
+    /// Chunked ingest. Stops at the first failed batch: readings arrive
+    /// time-ascending, and a later successful batch would advance the server's
+    /// stream cursor past the failed window, turning it into a permanent gap.
+    /// Stopping leaves the cursor at the last contiguous point so the next
+    /// cycle re-fetches the remainder.
     pub async fn ingest_readings_batched(
         &self,
         stream_id: Uuid,
@@ -225,12 +230,18 @@ impl RiverDataClient {
         batch_size: usize,
     ) -> BatchedIngest {
         let mut result = BatchedIngest::default();
+        let mut sent = 0usize;
         for chunk in readings.chunks(batch_size.max(1)) {
             match self.ingest_readings(stream_id, chunk).await {
-                Ok(inserted) => result.inserted += inserted,
+                Ok(inserted) => {
+                    result.inserted += inserted;
+                    sent += chunk.len();
+                }
                 Err(e) => {
-                    tracing::warn!(%stream_id, batch_len = chunk.len(), error = %e, "Ingest batch failed");
+                    tracing::warn!(%stream_id, batch_len = chunk.len(), error = %e, "Ingest batch failed, deferring rest of stream to next cycle");
                     result.failed_batches += 1;
+                    result.deferred = readings.len() - sent;
+                    break;
                 }
             }
         }
@@ -251,33 +262,6 @@ impl RiverDataClient {
             .send()
             .await
             .map_err(|e| RiverDataClientError::Api(format!("refresh_aggregates failed: {e}")))?;
-        self.check_response(&resp)?;
-        Ok(())
-    }
-
-    pub async fn compute_derived(
-        &self,
-        site_timestamps: &[(Uuid, Vec<chrono::DateTime<chrono::Utc>>)],
-    ) -> Result<(), RiverDataClientError> {
-        let entries: Vec<serde_json::Value> = site_timestamps
-            .iter()
-            .map(|(site_id, timestamps)| {
-                serde_json::json!({
-                    "site_id": site_id,
-                    "timestamps": timestamps,
-                })
-            })
-            .collect();
-
-        let body = serde_json::json!({ "site_timestamps": entries });
-        let resp = self
-            .http_client
-            .post(self.url("/actions/compute_derived"))
-            .bearer_auth(self.current_token())
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("compute_derived failed: {e}")))?;
         self.check_response(&resp)?;
         Ok(())
     }

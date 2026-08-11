@@ -24,6 +24,7 @@ pub struct SyncServiceResponse {
     pub service_type: String,
     pub instance_id: String,
     pub status: String,
+    pub paused: bool,
     pub current_operation: Option<String>,
     pub last_heartbeat: Option<String>,
     pub last_sync_completed_at: Option<String>,
@@ -59,6 +60,7 @@ fn service_to_response(s: sync_services::Model, config: &crate::models::SyncServ
         service_type: s.service_type,
         instance_id: s.instance_id,
         status: s.status,
+        paused: s.paused,
         current_operation: s.current_operation,
         last_heartbeat: s.last_heartbeat.map(|t| t.to_rfc3339()),
         last_sync_completed_at: s.last_sync_completed_at.map(|t| t.to_rfc3339()),
@@ -248,7 +250,7 @@ pub async fn issue_command<S: SyncState>(
     Path(service_id): Path<Uuid>,
     Json(req): Json<IssueCommandRequest>,
 ) -> SyncResult<Json<SyncCommandResponse>> {
-    sync_services::Entity::find_by_id(service_id)
+    let service = sync_services::Entity::find_by_id(service_id)
         .one(state.db())
         .await?
         .ok_or_else(|| SyncError::NotFound("Service not found".to_string()))?;
@@ -265,6 +267,20 @@ pub async fn issue_command<S: SyncState>(
             req.command,
             valid_commands.join(", ")
         )));
+    }
+
+    // Persist the desired pause state at issue time so it takes effect even if
+    // the service is down and never acknowledges the command.
+    let desired_pause = match req.command.as_str() {
+        commands::PAUSE => Some(true),
+        commands::RESUME => Some(false),
+        _ => None,
+    };
+    if let Some(paused) = desired_pause {
+        let mut active: sync_services::ActiveModel = service.into();
+        active.paused = Set(paused);
+        active.updated_at = Set(Utc::now().into());
+        active.update(state.db()).await?;
     }
 
     let expiry_secs = state.sync_config().command_expiry_secs as i64;

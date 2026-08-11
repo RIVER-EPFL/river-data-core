@@ -32,14 +32,21 @@ pub(crate) static SESSION_TOKEN_CACHE: LazyLock<Cache<Uuid, String>> = LazyLock:
         (status = 200, description = "Heartbeat acknowledged; fresh token and pending commands", body = HeartbeatResponse),
         (status = 400, description = "Invalid status string"),
         (status = 401, description = "Invalid or expired session token"),
+        (status = 403, description = "service_id does not match the authenticated service"),
     ),
     tag = "sync"
 )]
 pub async fn heartbeat<S: SyncState>(
     State(state): State<S>,
-    _ctx: SyncServiceContext,
+    ctx: SyncServiceContext,
     Json(req): Json<HeartbeatRequest>,
 ) -> SyncResult<Json<HeartbeatResponse>> {
+    if req.service_id != ctx.service_id {
+        return Err(SyncError::Forbidden(
+            "Heartbeat service_id does not match the authenticated service".to_string(),
+        ));
+    }
+
     if ServiceStatus::from_str(&req.status).is_none() {
         let valid: Vec<&str> = ServiceStatus::ALL.iter().map(|s| s.as_str()).collect();
         return Err(SyncError::BadRequest(format!(
@@ -54,6 +61,7 @@ pub async fn heartbeat<S: SyncState>(
         .await?
         .ok_or_else(|| SyncError::NotFound("Service not found".to_string()))?;
 
+    let paused = service.paused;
     let mut active: sync_services::ActiveModel = service.into();
     active.status = Set(req.status);
     active.current_operation = Set(req.current_operation);
@@ -96,8 +104,12 @@ pub async fn heartbeat<S: SyncState>(
         let _ = db_clone
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                "UPDATE sync_commands SET status = 'expired' WHERE service_id = $1 AND status = 'pending' AND expires_at < NOW()",
-                [sid.into()],
+                "UPDATE sync_commands SET status = $2 WHERE service_id = $1 AND status = $3 AND expires_at < NOW()",
+                [
+                    sid.into(),
+                    CommandStatus::Expired.as_str().into(),
+                    CommandStatus::Pending.as_str().into(),
+                ],
             ))
             .await;
     });
@@ -105,5 +117,6 @@ pub async fn heartbeat<S: SyncState>(
     Ok(Json(HeartbeatResponse {
         session_token,
         pending_commands,
+        paused,
     }))
 }

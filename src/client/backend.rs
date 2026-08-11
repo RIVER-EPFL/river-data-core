@@ -9,6 +9,13 @@ pub trait SourceBackend: Send + Sync + 'static {
     /// The source_system string streams register under (ie. "vaisala", "cnet").
     fn source_system(&self) -> &str;
 
+    /// Run discovery on every cycle instead of once at startup plus full syncs.
+    /// Return true when discovery is cheap and new streams appear without
+    /// operator action (ie. rows added to a portal database).
+    fn rediscover_every_cycle(&self) -> bool {
+        false
+    }
+
     /// Enumerate the streams this source provides.
     async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError>;
 

@@ -47,6 +47,7 @@ fn stream_json(id: Uuid, source_key: &str, last_data_time: Option<&str>) -> serd
 struct FakeBackend {
     readings_per_stream: usize,
     fail_fetch: bool,
+    rediscover: bool,
     fetch_calls: Arc<AtomicU32>,
     fetch_requests: Arc<Mutex<Vec<Vec<StreamFetchRequest>>>>,
 }
@@ -55,6 +56,10 @@ struct FakeBackend {
 impl SourceBackend for FakeBackend {
     fn source_system(&self) -> &str {
         "fake"
+    }
+
+    fn rediscover_every_cycle(&self) -> bool {
+        self.rediscover
     }
 
     async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError> {
@@ -104,7 +109,7 @@ async fn harness(backend: FakeBackend, streams: Vec<serde_json::Value>) -> Harne
     Mock::given(method("POST"))
         .and(path("/api/streams/register"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(&stream_json(Uuid::new_v4(), "s1", None)),
+            ResponseTemplate::new(200).set_body_json(stream_json(Uuid::new_v4(), "s1", None)),
         )
         .mount(&server)
         .await;
@@ -230,7 +235,113 @@ async fn test_retry_exhaustion_fails_sync() {
 
     let err = h.driver.sync(false).await.unwrap_err();
     assert!(err.to_string().contains("source unavailable"));
-    assert_eq!(fetch_calls.load(Ordering::SeqCst), 3);
+    // RETRY_MAX counts retries after the first attempt: 1 + 3 = 4 calls.
+    assert_eq!(fetch_calls.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
+async fn test_ingest_stops_at_first_failed_batch() {
+    let h = harness(
+        FakeBackend { readings_per_stream: 2500, ..Default::default() },
+        vec![stream_json(Uuid::new_v4(), "s1", None)],
+    )
+    .await;
+
+    // Second ingest call fails; later batches must not be sent, or the
+    // server-side cursor would advance past the gap.
+    h.server.reset().await;
+    let calls = Arc::new(AtomicU32::new(0));
+    let calls_in_mock = calls.clone();
+    Mock::given(method("GET"))
+        .and(path("/api/data_streams"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-range", "data_streams 0-1/1")
+                .set_body_json(vec![stream_json(Uuid::new_v4(), "s1", None)]),
+        )
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/ingest"))
+        .respond_with(move |req: &Request| {
+            let call = calls_in_mock.fetch_add(1, Ordering::SeqCst);
+            if call == 1 {
+                return ResponseTemplate::new(500);
+            }
+            let body: serde_json::Value = req.body_json().unwrap();
+            let n = body["readings"].as_array().map(|a| a.len()).unwrap_or(0);
+            ResponseTemplate::new(200).set_body_json(json!({"inserted": n}))
+        })
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/actions/refresh_aggregates"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&h.server)
+        .await;
+
+    let result = h.driver.sync(false).await.unwrap();
+    assert_eq!(result.readings_synced, 1000);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(result.errors.iter().any(|e| e.contains("1500 readings deferred")));
+}
+
+#[tokio::test]
+async fn test_rediscovery_every_cycle_when_backend_asks() {
+    let h = harness(
+        FakeBackend { readings_per_stream: 1, rediscover: true, ..Default::default() },
+        vec![stream_json(Uuid::new_v4(), "s1", None)],
+    )
+    .await;
+
+    h.driver.sync(false).await.unwrap();
+    h.driver.sync(false).await.unwrap();
+    assert_eq!(count(&h.server, "POST", "/api/streams/register").await, 2);
+}
+
+#[tokio::test]
+async fn test_discovery_retried_after_failed_registration() {
+    let h = harness(
+        FakeBackend { readings_per_stream: 1, ..Default::default() },
+        vec![stream_json(Uuid::new_v4(), "s1", None)],
+    )
+    .await;
+
+    h.server.reset().await;
+    Mock::given(method("POST"))
+        .and(path("/api/streams/register"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/data_streams"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-range", "data_streams 0-1/1")
+                .set_body_json(vec![stream_json(Uuid::new_v4(), "s1", None)]),
+        )
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/ingest"))
+        .respond_with(|req: &Request| {
+            let body: serde_json::Value = req.body_json().unwrap();
+            let n = body["readings"].as_array().map(|a| a.len()).unwrap_or(0);
+            ResponseTemplate::new(200).set_body_json(json!({"inserted": n}))
+        })
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/actions/refresh_aggregates"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&h.server)
+        .await;
+
+    // Registration fails on both cycles; the failed pass must not latch the
+    // discovery flag, so the second cycle tries again.
+    h.driver.sync(false).await.unwrap();
+    h.driver.sync(false).await.unwrap();
+    assert_eq!(count(&h.server, "POST", "/api/streams/register").await, 2);
 }
 
 #[tokio::test]
