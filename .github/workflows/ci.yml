@@ -31,8 +31,8 @@ jobs:
         run: cargo check --no-default-features
       - name: Check client
         run: cargo check --features client
-      - name: Check server
-        run: cargo check --features server
+      - name: Check openapi
+        run: cargo check --features openapi
       - name: Check toolbox
         run: cargo check --features toolbox
       - name: Build examples
