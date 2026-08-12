@@ -1,27 +1,6 @@
 use crate::env;
 
 #[derive(Debug, Clone)]
-pub struct SyncServerConfig {
-    pub session_token_ttl_secs: u64,
-    pub command_expiry_secs: u64,
-    pub health_healthy_secs: i64,
-    pub health_warning_secs: i64,
-    pub client_id_prefix: String,
-}
-
-impl Default for SyncServerConfig {
-    fn default() -> Self {
-        Self {
-            session_token_ttl_secs: 900,
-            command_expiry_secs: 300,
-            health_healthy_secs: 90,
-            health_warning_secs: 300,
-            client_id_prefix: "svc_".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct RunnerConfig {
     pub api_base_url: String,
     pub client_id: String,

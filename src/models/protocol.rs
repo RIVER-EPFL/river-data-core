@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::models::status::{SyncEventStatus, SyncEventType};
 
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "server", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollRequest {
     pub client_id: String,
     pub client_secret: String,
@@ -12,7 +12,7 @@ pub struct EnrollRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "server", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollResponse {
     pub service_id: Uuid,
     pub session_token: String,
@@ -23,7 +23,7 @@ pub struct EnrollResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "server", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HeartbeatRequest {
     pub service_id: Uuid,
     pub status: String,
@@ -31,7 +31,7 @@ pub struct HeartbeatRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "server", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HeartbeatResponse {
     pub session_token: String,
     pub pending_commands: Vec<PendingCommand>,
@@ -41,19 +41,19 @@ pub struct HeartbeatResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "server", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PendingCommand {
     pub id: Uuid,
     pub command: String,
-    #[cfg_attr(feature = "server", schema(value_type = Object))]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub payload: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "server", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CommandUpdateRequest {
     pub status: String,
-    #[cfg_attr(feature = "server", schema(value_type = Object))]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub result: Option<serde_json::Value>,
 }
 

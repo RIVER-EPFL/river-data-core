@@ -3,14 +3,8 @@ pub mod env;
 pub mod error;
 pub mod models;
 
-#[cfg(feature = "server")]
-pub mod crypto;
-
 #[cfg(feature = "client")]
 pub mod client;
-
-#[cfg(feature = "server")]
-pub mod server;
 
 #[cfg(feature = "toolbox")]
 pub mod toolbox;
