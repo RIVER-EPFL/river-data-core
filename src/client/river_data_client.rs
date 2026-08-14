@@ -15,10 +15,24 @@ pub struct RiverDataClient {
     token: std::sync::RwLock<String>,
 }
 
+/// Outcome of a single ingest call.
+#[derive(Debug, Default)]
+pub struct IngestOutcome {
+    pub inserted: u64,
+    /// Readings the API refused admission (out of window, non-finite, unknown
+    /// measurement type). They are dropped, not deferred: the stream cursor
+    /// advances past them.
+    pub skipped: u64,
+    /// One entry per rejection kind, with its count.
+    pub skipped_reasons: Vec<String>,
+}
+
 /// Outcome of a chunked ingest.
 #[derive(Debug, Default)]
 pub struct BatchedIngest {
     pub inserted: u64,
+    pub skipped: u64,
+    pub skipped_reasons: Vec<String>,
     pub failed_batches: usize,
     /// Readings not attempted because an earlier batch failed.
     pub deferred: usize,
@@ -160,10 +174,15 @@ impl RiverDataClient {
         &self,
         stream_id: Uuid,
         readings: &[IngestReading],
-    ) -> Result<u64, RiverDataClientError> {
+    ) -> Result<IngestOutcome, RiverDataClientError> {
         #[derive(serde::Deserialize)]
         struct IngestResponse {
             inserted: u64,
+            // Absent on an API older than the per-reading admission change.
+            #[serde(default)]
+            skipped: u64,
+            #[serde(default)]
+            skipped_reasons: Vec<String>,
         }
 
         let body = serde_json::json!({
@@ -183,7 +202,11 @@ impl RiverDataClient {
             .json()
             .await
             .map_err(|e| RiverDataClientError::Api(format!("parse ingest response: {e}")))?;
-        Ok(result.inserted)
+        Ok(IngestOutcome {
+            inserted: result.inserted,
+            skipped: result.skipped,
+            skipped_reasons: result.skipped_reasons,
+        })
     }
 
     pub async fn ingest_status_events(
@@ -207,9 +230,7 @@ impl RiverDataClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                RiverDataClientError::Api(format!("ingest_status_events failed: {e}"))
-            })?;
+            .map_err(|e| RiverDataClientError::Api(format!("ingest_status_events failed: {e}")))?;
         self.check_response(&resp)?;
         let result: IngestResponse = resp
             .json()
@@ -218,7 +239,7 @@ impl RiverDataClient {
         Ok(result.inserted)
     }
 
-    /// Chunked ingest. Stops at the first failed batch: readings arrive
+    /// Chunked ingest. Stops at the first failed batch: chunks are sent
     /// time-ascending, and a later successful batch would advance the server's
     /// stream cursor past the failed window, turning it into a permanent gap.
     /// Stopping leaves the cursor at the last contiguous point so the next
@@ -229,12 +250,21 @@ impl RiverDataClient {
         readings: &[IngestReading],
         batch_size: usize,
     ) -> BatchedIngest {
+        // The server cursor is forward-only and moves to the newest reading it
+        // accepted, so a chunk out of time order can carry the cursor past rows
+        // a later chunk still has to send. Sorting here makes the ascending
+        // order the contract depends on hold for every backend.
+        let mut ordered = readings.to_vec();
+        ordered.sort_by_key(|r| r.time);
+
         let mut result = BatchedIngest::default();
         let mut sent = 0usize;
-        for chunk in readings.chunks(batch_size.max(1)) {
+        for chunk in ordered.chunks(batch_size.max(1)) {
             match self.ingest_readings(stream_id, chunk).await {
-                Ok(inserted) => {
-                    result.inserted += inserted;
+                Ok(outcome) => {
+                    result.inserted += outcome.inserted;
+                    result.skipped += outcome.skipped;
+                    result.skipped_reasons.extend(outcome.skipped_reasons);
                     sent += chunk.len();
                 }
                 Err(e) => {
@@ -355,10 +385,7 @@ mod tests {
             client.url("/data_streams"),
             "http://localhost:3000/api/data_streams"
         );
-        assert_eq!(
-            client.url("/ingest"),
-            "http://localhost:3000/api/ingest"
-        );
+        assert_eq!(client.url("/ingest"), "http://localhost:3000/api/ingest");
     }
 
     #[test]

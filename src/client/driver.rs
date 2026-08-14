@@ -4,7 +4,9 @@ use std::time::Duration;
 use crate::client::backend::SourceBackend;
 use crate::client::river_data_client::RiverDataClient;
 use crate::client::service::SyncService;
-use crate::models::{DataStream, RegisterStreamRequest, RunnerConfig, StreamFetchRequest, SyncResult};
+use crate::models::{
+    DataStream, RegisterStreamRequest, RunnerConfig, StreamFetchRequest, SyncResult,
+};
 
 pub const INGEST_BATCH_SIZE: usize = 1000;
 
@@ -33,13 +35,18 @@ pub struct SyncDriver {
 struct ReadingsOutcome {
     streams: Vec<DataStream>,
     readings_synced: u64,
+    readings_skipped: u64,
     streams_with_data: usize,
     log: Vec<String>,
     errors: Vec<String>,
 }
 
 impl SyncDriver {
-    pub fn new(backend: Box<dyn SourceBackend>, api: RiverDataClient, config: &RunnerConfig) -> Self {
+    pub fn new(
+        backend: Box<dyn SourceBackend>,
+        api: RiverDataClient,
+        config: &RunnerConfig,
+    ) -> Self {
         Self {
             backend,
             api,
@@ -73,7 +80,9 @@ impl SyncDriver {
                 Ok(_) => registered += 1,
                 Err(e) => {
                     tracing::warn!(source_key = %d.source_key, error = %e, "Stream registration failed");
-                    result.errors.push(format!("{}: registration failed", d.source_key));
+                    result
+                        .errors
+                        .push(format!("{}: registration failed", d.source_key));
                 }
             }
         }
@@ -83,7 +92,9 @@ impl SyncDriver {
         if registered == descriptors.len() {
             self.discovered.store(true, Ordering::Relaxed);
         }
-        result.log.push(format!("Stream discovery: {registered} streams registered"));
+        result
+            .log
+            .push(format!("Stream discovery: {registered} streams registered"));
     }
 
     async fn sync_readings_once(&self, full: bool) -> Result<ReadingsOutcome, String> {
@@ -111,6 +122,7 @@ impl SyncDriver {
         let mut outcome = ReadingsOutcome {
             streams,
             readings_synced: 0,
+            readings_skipped: 0,
             streams_with_data: 0,
             log: Vec::new(),
             errors: Vec::new(),
@@ -125,6 +137,7 @@ impl SyncDriver {
                 .ingest_readings_batched(sr.stream_id, &sr.readings, INGEST_BATCH_SIZE)
                 .await;
             outcome.readings_synced += batch.inserted;
+            outcome.readings_skipped += batch.skipped;
             if batch.failed_batches > 0 {
                 outcome.errors.push(format!(
                     "{}: ingest failed, {} readings deferred to next cycle",
@@ -133,13 +146,33 @@ impl SyncDriver {
             }
             if batch.inserted > 0 {
                 outcome.streams_with_data += 1;
-                if outcome.log.len() < MAX_LOG_LINES {
-                    outcome
-                        .log
-                        .push(format!("{}: {} new readings", sr.source_key, batch.inserted));
-                } else {
-                    tracing::debug!(source_key = %sr.source_key, inserted = batch.inserted, "New readings");
+            }
+            if batch.inserted > 0 || batch.skipped > 0 {
+                let mut line = format!("{}: {} new readings", sr.source_key, batch.inserted);
+                if batch.skipped > 0 {
+                    line.push_str(&format!(
+                        ", {} skipped ({})",
+                        batch.skipped,
+                        batch.skipped_reasons.join("; ")
+                    ));
                 }
+                if outcome.log.len() < MAX_LOG_LINES {
+                    outcome.log.push(line);
+                } else {
+                    tracing::debug!(source_key = %sr.source_key, inserted = batch.inserted, skipped = batch.skipped, "Stream ingest");
+                }
+            }
+            // A wholly refused stream must surface as a partial cycle, which the runner derives
+            // from a non-empty error list. Measured against what was sent: `inserted` counts rows
+            // the upsert wrote, and is legitimately 0 whenever a backend re-sends a window
+            // boundary it has already stored.
+            if batch.skipped > 0 && batch.skipped as usize == sr.readings.len() {
+                outcome.errors.push(format!(
+                    "{}: all {} readings refused admission ({})",
+                    sr.source_key,
+                    batch.skipped,
+                    batch.skipped_reasons.join("; ")
+                ));
             }
         }
 
@@ -178,7 +211,11 @@ impl SyncDriver {
             if se.events.is_empty() {
                 continue;
             }
-            match self.api.ingest_status_events(se.stream_id, &se.events).await {
+            match self
+                .api
+                .ingest_status_events(se.stream_id, &se.events)
+                .await
+            {
                 Ok(inserted) => result.status_events_synced += inserted,
                 Err(e) => {
                     tracing::warn!(source_key = %se.source_key, error = %e, "Status event ingest failed");
@@ -193,12 +230,13 @@ impl SyncDriver {
 
 #[async_trait::async_trait]
 impl SyncService for SyncDriver {
-    async fn sync(&self, full: bool) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
+    async fn sync(
+        &self,
+        full: bool,
+    ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
         let mut result = SyncResult::default();
 
-        if full
-            || !self.discovered.load(Ordering::Relaxed)
-            || self.backend.rediscover_every_cycle()
+        if full || !self.discovered.load(Ordering::Relaxed) || self.backend.rediscover_every_cycle()
         {
             self.discover(&mut result).await;
         }
@@ -208,9 +246,13 @@ impl SyncService for SyncDriver {
         let outcome = match readings {
             Ok((outcome, retries)) => {
                 result.readings_synced = outcome.readings_synced;
+                result.readings_skipped = outcome.readings_skipped;
                 result.log.push(format!(
-                    "Readings sync: {} readings across {} streams ({} retries)",
-                    outcome.readings_synced, outcome.streams_with_data, retries
+                    "Readings sync: {} readings across {} streams, {} skipped ({} retries)",
+                    outcome.readings_synced,
+                    outcome.streams_with_data,
+                    outcome.readings_skipped,
+                    retries
                 ));
                 result.log.extend(outcome.log);
                 result.errors.extend(outcome.errors);

@@ -77,6 +77,10 @@ pub struct SyncEventUpdate {
     pub status: Option<SyncEventStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub readings_synced: Option<u64>,
+    /// Readings the API refused admission. Carried on the event rather than left to the process
+    /// log, so a stream losing rows every cycle leaves a queryable trace.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readings_skipped: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_events_synced: Option<u64>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -92,6 +96,10 @@ pub struct SyncEventUpdate {
 #[derive(Debug, Default, Serialize)]
 pub struct SyncResult {
     pub readings_synced: u64,
+    /// Readings the API refused admission and dropped. Additive: a reader that
+    /// predates the field must still parse the rest.
+    #[serde(default)]
+    pub readings_skipped: u64,
     pub status_events_synced: u64,
     pub full_sync: bool,
     pub duration_ms: u64,

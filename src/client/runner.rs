@@ -21,7 +21,9 @@ type ActiveEvent = Arc<RwLock<Option<Uuid>>>;
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
-        let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+        let mut term = match tokio::signal::unix::signal(
+            tokio::signal::unix::SignalKind::terminate(),
+        ) {
             Ok(t) => t,
             Err(e) => {
                 tracing::warn!(error = %e, "SIGTERM handler unavailable, listening for SIGINT only");
@@ -79,12 +81,17 @@ impl<S: SyncService> SyncServiceRunner<S> {
             {
                 Ok(resp) => break resp,
                 Err(ControlPlaneError::CredentialsRevoked) => {
-                    tracing::warn!(retry_secs = self.config.enrollment_retry_secs, "Credentials not found or invalid, retrying");
-                    tokio::time::sleep(Duration::from_secs(self.config.enrollment_retry_secs)).await;
+                    tracing::warn!(
+                        retry_secs = self.config.enrollment_retry_secs,
+                        "Credentials not found or invalid, retrying"
+                    );
+                    tokio::time::sleep(Duration::from_secs(self.config.enrollment_retry_secs))
+                        .await;
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, retry_secs = self.config.enrollment_retry_secs, "Enrollment failed, retrying");
-                    tokio::time::sleep(Duration::from_secs(self.config.enrollment_retry_secs)).await;
+                    tokio::time::sleep(Duration::from_secs(self.config.enrollment_retry_secs))
+                        .await;
                 }
             }
         };
@@ -211,7 +218,11 @@ impl<S: SyncService> SyncServiceRunner<S> {
                 Err(ControlPlaneError::CredentialsRevoked) => {
                     tracing::error!("Credentials revoked, attempting re-enrollment");
                     match client
-                        .enroll(&config.client_id, &config.client_secret, &config.instance_id)
+                        .enroll(
+                            &config.client_id,
+                            &config.client_secret,
+                            &config.instance_id,
+                        )
                         .await
                     {
                         Ok(resp) => {
@@ -391,6 +402,7 @@ impl<S: SyncService> SyncServiceRunner<S> {
                             SyncEventStatus::Partial
                         }),
                         readings_synced: Some(r.readings_synced),
+                        readings_skipped: Some(r.readings_skipped),
                         status_events_synced: Some(r.status_events_synced),
                         errors: r.errors.clone(),
                         log: r.log.clone(),
@@ -412,6 +424,7 @@ impl<S: SyncService> SyncServiceRunner<S> {
                         CommandStatus::Completed,
                         serde_json::json!({
                             "readings_synced": r.readings_synced,
+                            "readings_skipped": r.readings_skipped,
                             "status_events_synced": r.status_events_synced,
                             "errors": r.errors,
                             "duration_ms": r.duration_ms,
@@ -425,7 +438,10 @@ impl<S: SyncService> SyncServiceRunner<S> {
                         }),
                     ),
                 };
-                if let Err(e) = api.update_command(cmd_id, cmd_status, Some(result_json)).await {
+                if let Err(e) = api
+                    .update_command(cmd_id, cmd_status, Some(result_json))
+                    .await
+                {
                     tracing::warn!(error = %e, "Failed to update command status");
                 }
             }
