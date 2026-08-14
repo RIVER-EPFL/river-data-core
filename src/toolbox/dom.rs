@@ -45,5 +45,4 @@ mod tests {
         let result = absorbance_ratio(0.2, 0.05);
         assert!((result - 4.0).abs() < TOL);
     }
-
 }

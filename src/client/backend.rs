@@ -1,4 +1,6 @@
-use crate::models::{DataStream, StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents};
+use crate::models::{
+    DataStream, StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents,
+};
 
 pub type BackendError = Box<dyn std::error::Error + Send + Sync>;
 

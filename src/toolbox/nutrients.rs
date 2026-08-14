@@ -49,21 +49,15 @@ pub fn multi_nutrient_replicates(
     }
 
     // Compute NO3 = NOx - NO2 element-wise if both are present
-    let nox_key = species
-        .keys()
-        .find(|k| k.eq_ignore_ascii_case("NOx"));
-    let no2_key = species
-        .keys()
-        .find(|k| k.eq_ignore_ascii_case("NO2"));
+    let nox_key = species.keys().find(|k| k.eq_ignore_ascii_case("NOx"));
+    let no2_key = species.keys().find(|k| k.eq_ignore_ascii_case("NO2"));
 
     if let (Some(nox_k), Some(no2_k)) = (nox_key, no2_key) {
         let nox_reps = &species[nox_k];
         let no2_reps = &species[no2_k];
         let len = nox_reps.len().min(no2_reps.len());
         if len > 0 {
-            let no3_reps: Vec<f64> = (0..len)
-                .map(|i| nox_reps[i] - no2_reps[i])
-                .collect();
+            let no3_reps: Vec<f64> = (0..len).map(|i| nox_reps[i] - no2_reps[i]).collect();
             results.insert("NO3".to_string(), nutrient_from_replicates(&no3_reps));
         }
     }

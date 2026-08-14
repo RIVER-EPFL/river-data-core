@@ -6,7 +6,10 @@ use crate::models::SyncResult;
 /// hatch for services that need full control of the sync cycle.
 #[async_trait::async_trait]
 pub trait SyncService: Send + Sync + 'static {
-    async fn sync(&self, full: bool) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>>;
+    async fn sync(
+        &self,
+        full: bool,
+    ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>>;
 
     async fn handle_command(
         &self,

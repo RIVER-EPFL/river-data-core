@@ -35,7 +35,10 @@ impl CsvFolderBackend {
 }
 
 fn stream_key(path: &Path) -> String {
-    path.file_stem().unwrap_or_default().to_string_lossy().to_string()
+    path.file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string()
 }
 
 fn parse_row(line: &str) -> Option<(DateTime<Utc>, f64)> {

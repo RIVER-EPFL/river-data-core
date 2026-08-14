@@ -14,8 +14,13 @@ pub enum ServiceStatus {
 
 impl ServiceStatus {
     pub const ALL: &[ServiceStatus] = &[
-        Self::Starting, Self::Idle, Self::Running, Self::Paused,
-        Self::Syncing, Self::Error, Self::Stopping,
+        Self::Starting,
+        Self::Idle,
+        Self::Running,
+        Self::Paused,
+        Self::Syncing,
+        Self::Error,
+        Self::Stopping,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -81,7 +86,11 @@ pub enum SyncEventType {
 
 impl SyncEventType {
     pub const ALL: &[SyncEventType] = &[
-        Self::Scheduled, Self::Manual, Self::Command, Self::Triggered, Self::FullSync,
+        Self::Scheduled,
+        Self::Manual,
+        Self::Command,
+        Self::Triggered,
+        Self::FullSync,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -111,7 +120,11 @@ pub enum SyncEventStatus {
 
 impl SyncEventStatus {
     pub const ALL: &[SyncEventStatus] = &[
-        Self::Running, Self::Completed, Self::Partial, Self::Failed, Self::Cancelled,
+        Self::Running,
+        Self::Completed,
+        Self::Partial,
+        Self::Failed,
+        Self::Cancelled,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -129,7 +142,10 @@ impl SyncEventStatus {
     }
 
     pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed | Self::Partial | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Completed | Self::Partial | Self::Failed | Self::Cancelled
+        )
     }
 
     pub fn is_success(&self) -> bool {

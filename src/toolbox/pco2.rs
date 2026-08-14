@@ -201,8 +201,18 @@ pub fn pco2_full_pipeline(input: &Pco2FullInput, constants: &GasConstants) -> Pc
     );
 
     let pco2_uatm = pco2_from_co2aq(co2_hs_umol, input.water_temp_c, constants);
-    let pco2_p1_uatm = pco2_p1(co2_hs_umol, input.water_temp_c, input.field_pressure_hpa, constants);
-    let pco2_p2_uatm = pco2_p2(co2_hs_umol, input.water_temp_c, input.field_pressure_hpa, constants);
+    let pco2_p1_uatm = pco2_p1(
+        co2_hs_umol,
+        input.water_temp_c,
+        input.field_pressure_hpa,
+        constants,
+    );
+    let pco2_p2_uatm = pco2_p2(
+        co2_hs_umol,
+        input.water_temp_c,
+        input.field_pressure_hpa,
+        constants,
+    );
 
     let ch4_dry_ppm = ch4_dry(input.ch4_ppm, input.h2o_percent);
 
@@ -318,7 +328,10 @@ mod tests {
     fn test_pco2_from_co2aq() {
         let constants = GasConstants::default();
         let result = pco2_from_co2aq(50.0, 15.0, &constants);
-        assert!(result > 0.0 && result.is_finite(), "expected positive pCO2, got {result}");
+        assert!(
+            result > 0.0 && result.is_finite(),
+            "expected positive pCO2, got {result}"
+        );
     }
 
     #[test]
@@ -358,18 +371,36 @@ mod tests {
         let input = make_test_input(3000.0, 5.0, Some(-12.5));
         let result = pco2_full_pipeline(&input, &constants);
 
-        assert!(result.co2_hs_umol > 0.0 && result.co2_hs_umol.is_finite(),
-            "co2_hs_umol should be positive and finite, got {}", result.co2_hs_umol);
-        assert!(result.pco2_uatm > 0.0 && result.pco2_uatm.is_finite(),
-            "pco2_uatm should be positive and finite, got {}", result.pco2_uatm);
-        assert!(result.pco2_p1_uatm > 0.0 && result.pco2_p1_uatm.is_finite(),
-            "pco2_p1_uatm should be positive and finite, got {}", result.pco2_p1_uatm);
-        assert!(result.pco2_p2_uatm > 0.0 && result.pco2_p2_uatm.is_finite(),
-            "pco2_p2_uatm should be positive and finite, got {}", result.pco2_p2_uatm);
-        assert!(result.ch4_dry_ppm > 0.0 && result.ch4_dry_ppm.is_finite(),
-            "ch4_dry_ppm should be positive and finite, got {}", result.ch4_dry_ppm);
-        assert!(result.ch4_dissolved_umol.is_finite(),
-            "ch4_dissolved_umol should be finite, got {}", result.ch4_dissolved_umol);
+        assert!(
+            result.co2_hs_umol > 0.0 && result.co2_hs_umol.is_finite(),
+            "co2_hs_umol should be positive and finite, got {}",
+            result.co2_hs_umol
+        );
+        assert!(
+            result.pco2_uatm > 0.0 && result.pco2_uatm.is_finite(),
+            "pco2_uatm should be positive and finite, got {}",
+            result.pco2_uatm
+        );
+        assert!(
+            result.pco2_p1_uatm > 0.0 && result.pco2_p1_uatm.is_finite(),
+            "pco2_p1_uatm should be positive and finite, got {}",
+            result.pco2_p1_uatm
+        );
+        assert!(
+            result.pco2_p2_uatm > 0.0 && result.pco2_p2_uatm.is_finite(),
+            "pco2_p2_uatm should be positive and finite, got {}",
+            result.pco2_p2_uatm
+        );
+        assert!(
+            result.ch4_dry_ppm > 0.0 && result.ch4_dry_ppm.is_finite(),
+            "ch4_dry_ppm should be positive and finite, got {}",
+            result.ch4_dry_ppm
+        );
+        assert!(
+            result.ch4_dissolved_umol.is_finite(),
+            "ch4_dissolved_umol should be finite, got {}",
+            result.ch4_dissolved_umol
+        );
         assert_eq!(result.d13co2_permil, Some(-12.5));
     }
 
@@ -382,7 +413,9 @@ mod tests {
         let expected_pco2 = pco2_from_co2aq(result.co2_hs_umol, input.water_temp_c, &constants);
         assert!(
             (result.pco2_uatm - expected_pco2).abs() < 1e-10,
-            "pipeline pco2 {} != direct pco2 {}", result.pco2_uatm, expected_pco2
+            "pipeline pco2 {} != direct pco2 {}",
+            result.pco2_uatm,
+            expected_pco2
         );
     }
 
@@ -421,7 +454,9 @@ mod tests {
         let expected_sd = (rep.a.co2_hs_umol - rep.b.co2_hs_umol).abs() / 2.0_f64.sqrt();
         assert!(
             (rep.co2_hs_umol_sd - expected_sd).abs() < 1e-10,
-            "SD {} != expected {}", rep.co2_hs_umol_sd, expected_sd
+            "SD {} != expected {}",
+            rep.co2_hs_umol_sd,
+            expected_sd
         );
     }
 
@@ -439,7 +474,9 @@ mod tests {
         assert!(rep.b.co2_hs_umol.is_nan());
         assert!(
             (rep.co2_hs_umol_avg - rep.a.co2_hs_umol).abs() < 1e-10,
-            "avg {} != replicate A {}", rep.co2_hs_umol_avg, rep.a.co2_hs_umol
+            "avg {} != replicate A {}",
+            rep.co2_hs_umol_avg,
+            rep.a.co2_hs_umol
         );
         assert!(rep.co2_hs_umol_sd.is_nan());
     }
@@ -450,8 +487,14 @@ mod tests {
         let input = make_test_input(3000.0, 5.0, Some(-12.0));
         let rep = pco2_replicates(&input, &input, &constants);
 
-        assert!((rep.co2_hs_umol_sd).abs() < 1e-10, "identical inputs should give SD=0");
-        assert!((rep.pco2_uatm_sd).abs() < 1e-10, "identical inputs should give SD=0");
+        assert!(
+            (rep.co2_hs_umol_sd).abs() < 1e-10,
+            "identical inputs should give SD=0"
+        );
+        assert!(
+            (rep.pco2_uatm_sd).abs() < 1e-10,
+            "identical inputs should give SD=0"
+        );
         assert_eq!(rep.d13co2_permil_sd, Some(0.0));
     }
 }

@@ -100,12 +100,16 @@ pub fn chla_benthic_replicates(
                 benthic::per_m2(chla * 0.005, inp.vol_total_ml, vol_filtered, rock_area)
             });
 
-            let chla_noacid_m2 =
-                benthic::per_m2(chla_noacid_val * 0.005, inp.vol_total_ml, vol_filtered, rock_area);
+            let chla_noacid_m2 = benthic::per_m2(
+                chla_noacid_val * 0.005,
+                inp.vol_total_ml,
+                vol_filtered,
+                rock_area,
+            );
 
-            let afdm_m2 = inp.afdm_g_filter.map(|afdm| {
-                benthic::per_m2(afdm, inp.vol_total_ml, vol_filtered, rock_area)
-            });
+            let afdm_m2 = inp
+                .afdm_g_filter
+                .map(|afdm| benthic::per_m2(afdm, inp.vol_total_ml, vol_filtered, rock_area));
 
             ChlaReplicateOutput {
                 vol_filtered_ml: vol_filtered,
@@ -122,7 +126,10 @@ pub fn chla_benthic_replicates(
     // Collect values for cross-replicate statistics
     let acid_ug_l: Vec<f64> = replicates.iter().filter_map(|r| r.chla_acid_ug_l).collect();
     let noacid_ug_l: Vec<f64> = replicates.iter().map(|r| r.chla_noacid_ug_l).collect();
-    let acid_ug_m2: Vec<f64> = replicates.iter().filter_map(|r| r.chla_acid_ug_m2).collect();
+    let acid_ug_m2: Vec<f64> = replicates
+        .iter()
+        .filter_map(|r| r.chla_acid_ug_m2)
+        .collect();
     let noacid_ug_m2: Vec<f64> = replicates.iter().map(|r| r.chla_noacid_ug_m2).collect();
     let afdm_vals: Vec<f64> = replicates.iter().filter_map(|r| r.afdm_g_m2).collect();
 
@@ -131,16 +138,40 @@ pub fn chla_benthic_replicates(
 
     ChlaBenthicResult {
         replicates,
-        chla_acid_ug_l_avg: if has_acid { Some(common::mean(&acid_ug_l)) } else { None },
-        chla_acid_ug_l_sd: if has_acid { Some(common::std_dev(&acid_ug_l)) } else { None },
+        chla_acid_ug_l_avg: if has_acid {
+            Some(common::mean(&acid_ug_l))
+        } else {
+            None
+        },
+        chla_acid_ug_l_sd: if has_acid {
+            Some(common::std_dev(&acid_ug_l))
+        } else {
+            None
+        },
         chla_noacid_ug_l_avg: common::mean(&noacid_ug_l),
         chla_noacid_ug_l_sd: common::std_dev(&noacid_ug_l),
-        chla_acid_ug_m2_avg: if has_acid { Some(common::mean(&acid_ug_m2)) } else { None },
-        chla_acid_ug_m2_sd: if has_acid { Some(common::std_dev(&acid_ug_m2)) } else { None },
+        chla_acid_ug_m2_avg: if has_acid {
+            Some(common::mean(&acid_ug_m2))
+        } else {
+            None
+        },
+        chla_acid_ug_m2_sd: if has_acid {
+            Some(common::std_dev(&acid_ug_m2))
+        } else {
+            None
+        },
         chla_noacid_ug_m2_avg: common::mean(&noacid_ug_m2),
         chla_noacid_ug_m2_sd: common::std_dev(&noacid_ug_m2),
-        afdm_g_m2_avg: if has_afdm { Some(common::mean(&afdm_vals)) } else { None },
-        afdm_g_m2_sd: if has_afdm { Some(common::std_dev(&afdm_vals)) } else { None },
+        afdm_g_m2_avg: if has_afdm {
+            Some(common::mean(&afdm_vals))
+        } else {
+            None
+        },
+        afdm_g_m2_sd: if has_afdm {
+            Some(common::std_dev(&afdm_vals))
+        } else {
+            None
+        },
     }
 }
 
@@ -217,16 +248,14 @@ mod tests {
 
     #[test]
     fn test_chla_benthic_no_acid_only() {
-        let inputs = vec![
-            ChlaReplicateInput {
-                fluor_before: 50.0,
-                fluor_after: None,
-                vol_total_ml: 100.0,
-                vol_after_ml: 40.0,
-                diameters_cm: vec![8.0, 8.0, 8.0],
-                afdm_g_filter: None,
-            },
-        ];
+        let inputs = vec![ChlaReplicateInput {
+            fluor_before: 50.0,
+            fluor_after: None,
+            vol_total_ml: 100.0,
+            vol_after_ml: 40.0,
+            diameters_cm: vec![8.0, 8.0, 8.0],
+            afdm_g_filter: None,
+        }];
 
         let result = chla_benthic_replicates(&inputs, 0.5, 1.0, 0.8, 2.0);
 

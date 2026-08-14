@@ -121,7 +121,6 @@ impl ControlPlaneClient {
         self.session_token = Some(hb_resp.session_token.clone());
         Ok(hb_resp)
     }
-
 }
 
 #[cfg(test)]

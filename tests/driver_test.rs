@@ -108,16 +108,21 @@ async fn harness(backend: FakeBackend, streams: Vec<serde_json::Value>) -> Harne
 
     Mock::given(method("POST"))
         .and(path("/api/streams/register"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(stream_json(Uuid::new_v4(), "s1", None)),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(stream_json(
+            Uuid::new_v4(),
+            "s1",
+            None,
+        )))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
         .and(path("/api/data_streams"))
         .respond_with(
             ResponseTemplate::new(200)
-                .insert_header("content-range", format!("data_streams 0-{total}/{total}").as_str())
+                .insert_header(
+                    "content-range",
+                    format!("data_streams 0-{total}/{total}").as_str(),
+                )
                 .set_body_json(&streams),
         )
         .mount(&server)
@@ -160,7 +165,10 @@ async fn count(server: &MockServer, m: &str, p: &str) -> usize {
 #[tokio::test]
 async fn test_discovery_runs_once_then_again_on_full() {
     let h = harness(
-        FakeBackend { readings_per_stream: 1, ..Default::default() },
+        FakeBackend {
+            readings_per_stream: 1,
+            ..Default::default()
+        },
         vec![stream_json(Uuid::new_v4(), "s1", None)],
     )
     .await;
@@ -176,7 +184,10 @@ async fn test_discovery_runs_once_then_again_on_full() {
 #[tokio::test]
 async fn test_ingest_batches_at_1000() {
     let h = harness(
-        FakeBackend { readings_per_stream: 2500, ..Default::default() },
+        FakeBackend {
+            readings_per_stream: 2500,
+            ..Default::default()
+        },
         vec![stream_json(Uuid::new_v4(), "s1", None)],
     )
     .await;
@@ -207,7 +218,11 @@ async fn test_since_cursor_passthrough() {
         ..Default::default()
     };
     let id = Uuid::new_v4();
-    let h = harness(backend, vec![stream_json(id, "s1", Some("2026-01-15T12:00:00Z"))]).await;
+    let h = harness(
+        backend,
+        vec![stream_json(id, "s1", Some("2026-01-15T12:00:00Z"))],
+    )
+    .await;
 
     h.driver.sync(false).await.unwrap();
     h.driver.sync(true).await.unwrap();
@@ -242,7 +257,10 @@ async fn test_retry_exhaustion_fails_sync() {
 #[tokio::test]
 async fn test_ingest_stops_at_first_failed_batch() {
     let h = harness(
-        FakeBackend { readings_per_stream: 2500, ..Default::default() },
+        FakeBackend {
+            readings_per_stream: 2500,
+            ..Default::default()
+        },
         vec![stream_json(Uuid::new_v4(), "s1", None)],
     )
     .await;
@@ -283,13 +301,22 @@ async fn test_ingest_stops_at_first_failed_batch() {
     let result = h.driver.sync(false).await.unwrap();
     assert_eq!(result.readings_synced, 1000);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert!(result.errors.iter().any(|e| e.contains("1500 readings deferred")));
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("1500 readings deferred"))
+    );
 }
 
 #[tokio::test]
 async fn test_rediscovery_every_cycle_when_backend_asks() {
     let h = harness(
-        FakeBackend { readings_per_stream: 1, rediscover: true, ..Default::default() },
+        FakeBackend {
+            readings_per_stream: 1,
+            rediscover: true,
+            ..Default::default()
+        },
         vec![stream_json(Uuid::new_v4(), "s1", None)],
     )
     .await;
@@ -302,7 +329,10 @@ async fn test_rediscovery_every_cycle_when_backend_asks() {
 #[tokio::test]
 async fn test_discovery_retried_after_failed_registration() {
     let h = harness(
-        FakeBackend { readings_per_stream: 1, ..Default::default() },
+        FakeBackend {
+            readings_per_stream: 1,
+            ..Default::default()
+        },
         vec![stream_json(Uuid::new_v4(), "s1", None)],
     )
     .await;
@@ -353,17 +383,26 @@ async fn test_aggregates_skipped_when_no_readings() {
     .await;
 
     h.driver.sync(false).await.unwrap();
-    assert_eq!(count(&h.server, "POST", "/api/actions/refresh_aggregates").await, 0);
+    assert_eq!(
+        count(&h.server, "POST", "/api/actions/refresh_aggregates").await,
+        0
+    );
 }
 
 #[tokio::test]
 async fn test_aggregates_refreshed_after_readings() {
     let h = harness(
-        FakeBackend { readings_per_stream: 5, ..Default::default() },
+        FakeBackend {
+            readings_per_stream: 5,
+            ..Default::default()
+        },
         vec![stream_json(Uuid::new_v4(), "s1", None)],
     )
     .await;
 
     h.driver.sync(false).await.unwrap();
-    assert_eq!(count(&h.server, "POST", "/api/actions/refresh_aggregates").await, 1);
+    assert_eq!(
+        count(&h.server, "POST", "/api/actions/refresh_aggregates").await,
+        1
+    );
 }
