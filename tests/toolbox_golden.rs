@@ -147,6 +147,19 @@ fn golden_common() {
         );
         count += 1;
     }
+    for case in &g.modules.common["apply_standard_curve"] {
+        check(
+            toolbox::common::apply_standard_curve(
+                v(&case.inputs, "raw"),
+                v(&case.inputs, "slope"),
+                v(&case.inputs, "intercept"),
+            ),
+            case,
+            "common",
+            "apply_standard_curve",
+        );
+        count += 1;
+    }
     for case in &g.modules.common["ratio"] {
         check(
             toolbox::common::ratio(v(&case.inputs, "dividend"), v(&case.inputs, "divisor")),
@@ -194,6 +207,18 @@ fn golden_dom() {
             case,
             "dom",
             "suva",
+        );
+        count += 1;
+    }
+    for case in &g.modules.dom["absorbance_ratio"] {
+        check(
+            toolbox::dom::absorbance_ratio(
+                v(&case.inputs, "numerator"),
+                v(&case.inputs, "denominator"),
+            ),
+            case,
+            "dom",
+            "absorbance_ratio",
         );
         count += 1;
     }
@@ -714,6 +739,25 @@ fn golden_dic() {
         );
         count += 1;
     }
+    for case in &g.modules.dic["dic"] {
+        let ctx = format!("dic::dic::{}", case.name);
+        let tol = case.tolerance.unwrap_or(1e-9);
+        let map = case.expected_map.as_ref().expect("expected_map");
+        let dc = dic_constants(&case.inputs);
+        let r = toolbox::dic::dic(
+            v(&case.inputs, "acid_sample_wght"),
+            v(&case.inputs, "acid_wght"),
+            v(&case.inputs, "vol_overpressure"),
+            v(&case.inputs, "sa_added"),
+            v(&case.inputs, "co2_dry"),
+            v(&case.inputs, "delta_13co2"),
+            v(&case.inputs, "air_temp_c"),
+            &dc,
+        );
+        check_map_value(map, "dic", r.dic_umol_l, tol, &ctx);
+        check_map_value(map, "d13c", r.d13c_dic_permil, tol, &ctx);
+        count += 1;
+    }
     eprintln!("dic: {count} passed");
 }
 
@@ -795,5 +839,64 @@ fn golden_nutrients() {
         check_map_value(map, "NO3_sd", no3.std_dev, tol, &ctx);
         count += 1;
     }
+    for case in &g.modules.nutrients["nutrient_from_replicates"] {
+        let ctx = format!("nutrients::nutrient_from_replicates::{}", case.name);
+        let tol = case.tolerance.unwrap_or(1e-9);
+        let map = case.expected_map.as_ref().expect("expected_map");
+        let nr = toolbox::nutrient_from_replicates(&v_vec(&case.inputs, "replicates"));
+        check_map_value(map, "avg", nr.mean, tol, &ctx);
+        check_map_value(map, "sd", nr.std_dev, tol, &ctx);
+        count += 1;
+    }
+    for case in &g.modules.nutrients["nitrate_from_nox_no2"] {
+        check(
+            toolbox::nitrate_from_nox_no2(v(&case.inputs, "nox"), v(&case.inputs, "no2")),
+            case,
+            "nutrients",
+            "nitrate_from_nox_no2",
+        );
+        count += 1;
+    }
     eprintln!("nutrients: {count} passed");
+}
+
+#[test]
+fn golden_pco2_full_pipeline() {
+    let g = fixture();
+    let mut count = 0;
+    for case in &g.modules.pco2["pco2_full_pipeline"] {
+        let ctx = format!("pco2::pco2_full_pipeline::{}", case.name);
+        let tol = case.tolerance.unwrap_or(1e-9);
+        let map = case.expected_map.as_ref().expect("expected_map");
+
+        let gc = toolbox::pco2::GasConstants {
+            c_const: v(&case.inputs, "c_const"),
+            gas_const_r_atm: v(&case.inputs, "gas_const_r_atm"),
+            gas_const_r_mol: v(&case.inputs, "gas_const_r_mol"),
+            h_ch4_29815k: v(&case.inputs, "h_ch4_29815k"),
+            ch4_in_sa: v(&case.inputs, "ch4_in_sa"),
+        };
+        let input = toolbox::Pco2FullInput {
+            co2_ppm: v(&case.inputs, "co2_ppm"),
+            h2o_percent: v(&case.inputs, "h2o_percent"),
+            ch4_ppm: v(&case.inputs, "ch4_ppm"),
+            d13co2_permil: None,
+            lab_temp_c: v(&case.inputs, "lab_temp_c"),
+            lab_pressure_atm: v(&case.inputs, "lab_pressure_atm"),
+            vol_sa_ml: v(&case.inputs, "vol_sa_ml"),
+            vol_water_ml: v(&case.inputs, "vol_water_ml"),
+            water_temp_c: v(&case.inputs, "water_temp_c"),
+            field_pressure_hpa: v(&case.inputs, "bp_hpa"),
+        };
+        let r = toolbox::pco2_full_pipeline(&input, &gc);
+
+        check_map_value(map, "co2_hs", r.co2_hs_umol, tol, &ctx);
+        check_map_value(map, "pco2", r.pco2_uatm, tol, &ctx);
+        check_map_value(map, "pco2_p1", r.pco2_p1_uatm, tol, &ctx);
+        check_map_value(map, "pco2_p2", r.pco2_p2_uatm, tol, &ctx);
+        check_map_value(map, "ch4_dry", r.ch4_dry_ppm, tol, &ctx);
+        check_map_value(map, "ch4_dissolved", r.ch4_dissolved_umol, tol, &ctx);
+        count += 1;
+    }
+    eprintln!("pco2_full_pipeline: {count} passed");
 }

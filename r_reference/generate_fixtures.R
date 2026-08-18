@@ -1121,6 +1121,135 @@ gen_chla_benthic <- function() {
   cases
 }
 
+# calcChlaNoAcid is the portal's raw * stdCurve$a + stdCurve$b applied verbatim,
+# so it drives the standalone apply_standard_curve fixtures.
+gen_apply_standard_curve <- function() {
+  cases <- list(
+    tc("identity", list(raw = 100.0, slope = 1.0, intercept = 0.0),
+       r_chla_no_acid(100, 1, 0)),
+    tc("typical", list(raw = 100.0, slope = 1.05, intercept = -2.3),
+       r_chla_no_acid(100, 1.05, -2.3)),
+    tc("na_raw", list(raw = NA, slope = 1.05, intercept = -2.3),
+       r_chla_no_acid(NA_real_, 1.05, -2.3))
+  )
+  for (i in seq_len(N)) {
+    raw <- maybe_na(runif(1, -50, 500))
+    sl <- runif(1, 0.8, 1.3)
+    int <- runif(1, -10, 10)
+    cases <- c(cases, list(tc(paste0("rand_", i),
+      list(raw = raw, slope = sl, intercept = int),
+      r_chla_no_acid(raw, sl, int))))
+  }
+  cases
+}
+
+gen_absorbance_ratio <- function() {
+  cases <- list(
+    tc("e2_e3", list(numerator = 0.2, denominator = 0.05), r_ratio(0.2, 0.05)),
+    tc("zero_denominator", list(numerator = 0.2, denominator = 0.0), r_ratio(0.2, 0)),
+    tc("na", list(numerator = NA, denominator = 0.05), r_ratio(NA_real_, 0.05))
+  )
+  for (i in seq_len(N)) {
+    a <- maybe_na(runif(1, 0.001, 2))
+    b <- maybe_na(runif(1, 0.001, 2))
+    cases <- c(cases, list(tc(paste0("rand_", i),
+      list(numerator = a, denominator = b), r_ratio(a, b))))
+  }
+  cases
+}
+
+gen_nutrient_from_replicates <- function() {
+  cases <- list(
+    tcm("single", list(replicates = c(42.0)),
+        list(avg = r_mean(42.0), sd = r_sd(42.0)))
+  )
+  for (i in seq_len(N_MAP)) {
+    reps <- runif(sample(2:5, 1), 1, 300)
+    if (runif(1) < 0.15) reps[sample(length(reps), 1)] <- NA
+    cases <- c(cases, list(tcm(paste0("rand_", i),
+      list(replicates = reps),
+      list(avg = r_mean(reps), sd = r_sd(reps)))))
+  }
+  cases
+}
+
+gen_nitrate <- function() {
+  cases <- list(
+    tc("typical", list(nox = 50.0, no2 = 3.0), r_minus(50, 3)),
+    tc("na_nox", list(nox = NA, no2 = 3.0), r_minus(NA_real_, 3))
+  )
+  for (i in seq_len(N)) {
+    nox <- maybe_na(runif(1, 20, 300))
+    no2 <- maybe_na(runif(1, 0.5, 15))
+    cases <- c(cases, list(tc(paste0("rand_", i),
+      list(nox = nox, no2 = no2), r_minus(nox, no2))))
+  }
+  cases
+}
+
+gen_pco2_full_pipeline <- function() {
+  C <- PORTAL_CONSTANTS[["c_const"]]
+  R <- PORTAL_CONSTANTS[["gas_const_r_atm"]]
+  KH <- PORTAL_CONSTANTS[["h_ch4_29815k"]]
+  SA <- PORTAL_CONSTANTS[["ch4_in_sa"]]
+  GR <- PORTAL_CONSTANTS[["gas_const_r_mol"]]
+  cases <- list()
+  for (i in seq_len(N_MAP)) {
+    co2_ppm <- maybe_na(runif(1, 100, 10000), 0.1)
+    h2o <- runif(1, 0, 3.5)
+    ch4 <- maybe_na(runif(1, 1, 500), 0.1)
+    wt <- runif(1, 0.5, 25)
+    bp <- runif(1, 700, 1050)
+    lt <- runif(1, 15, 30)
+    lp <- runif(1, 0.9, 1.05)
+    vs <- runif(1, 0.02, 0.08)
+    vw <- runif(1, 0.02, 0.06)
+    co2_hs <- num(r_co2_headspace(co2_ppm, lt, lp, vs, vw, C, R))
+    ch4d <- num(r_ch4_dry(ch4, h2o))
+    cases <- c(cases, list(tcm(paste0("rand_", i),
+      list(co2_ppm = co2_ppm, h2o_percent = h2o, ch4_ppm = ch4,
+           water_temp_c = wt, bp_hpa = bp, lab_temp_c = lt, lab_pressure_atm = lp,
+           vol_sa_ml = vs, vol_water_ml = vw,
+           c_const = C, gas_const_r_atm = R,
+           h_ch4_29815k = KH, ch4_in_sa = SA, gas_const_r_mol = GR),
+      list(
+        co2_hs = co2_hs,
+        pco2 = r_pco2(co2_hs, wt, C),
+        pco2_p1 = r_pco2_p1(co2_hs, wt, bp, C),
+        pco2_p2 = r_pco2_p2(co2_hs, wt, bp, C),
+        ch4_dry = ch4d,
+        ch4_dissolved = r_dissolved_ch4(ch4d, wt, bp, lt, KH, SA, GR)
+      ))))
+  }
+  cases
+}
+
+gen_dic_combined <- function() {
+  H <- PORTAL_CONSTANTS[["h_co2_29815k"]]
+  G <- PORTAL_CONSTANTS[["gas_const_r_mol"]]
+  V <- PORTAL_CONSTANTS[["vial_volume"]]
+  P <- PORTAL_CONSTANTS[["h3po4_added"]]
+  cases <- list()
+  for (i in seq_len(N_MAP)) {
+    aw <- runif(1, 8, 10)
+    asw <- aw + runif(1, 0.5, 3)
+    vop <- runif(1, 0, 2)
+    sa <- runif(1, 0.05, 0.5)
+    co2 <- maybe_na(runif(1, 100, 10000), 0.1)
+    d13 <- maybe_na(runif(1, -25, 5), 0.1)
+    at <- runif(1, 15, 30)
+    cases <- c(cases, list(tcm(paste0("rand_", i),
+      list(acid_sample_wght = asw, acid_wght = aw, vol_overpressure = vop,
+           sa_added = sa, co2_dry = co2, delta_13co2 = d13, air_temp_c = at,
+           h_co2_29815k = H, gas_const_r_mol = G, vial_volume = V, h3po4_added = P),
+      list(
+        dic = r_dic(asw, aw, vop, sa, co2, at, H, G, V, P),
+        d13c = r_d13c_dic(asw, aw, vop, d13, at, H, G, V, P)
+      ))))
+  }
+  cases
+}
+
 # =============================================================================
 # Assemble and write
 # =============================================================================
@@ -1158,6 +1287,14 @@ cases$dic$dic_concentration <- gen_dic()
 cases$dic$d13c_dic <- gen_d13c_dic()
 cases$dic$dic_replicates <- gen_dic_replicates()
 cases$nutrients$multi_nutrient_replicates <- gen_nutrients()
+# The additions below run after every original generator so the RNG stream,
+# and therefore every original case, is unchanged on regeneration
+cases$common$apply_standard_curve <- gen_apply_standard_curve()
+cases$dom$absorbance_ratio <- gen_absorbance_ratio()
+cases$nutrients$nutrient_from_replicates <- gen_nutrient_from_replicates()
+cases$nutrients$nitrate_from_nox_no2 <- gen_nitrate()
+cases$pco2$pco2_full_pipeline <- gen_pco2_full_pipeline()
+cases$dic$dic <- gen_dic_combined()
 
 output <- list(
   metadata = list(

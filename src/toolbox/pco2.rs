@@ -43,6 +43,80 @@ impl Default for GasConstants {
     }
 }
 
+/// Lab-condition defaults from the portal `constants` table, consulted when the
+/// operator leaves a lab entry blank (R `calcCO2` 'default' mode).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabConstants {
+    /// Lab temperature fallback (degC). Portal `lab_temp_avg_degC`.
+    pub lab_temp_avg_degc: f64,
+    /// Lab pressure fallback, already in atm. Portal `lab_press_avg_atm`.
+    pub lab_press_avg_atm: f64,
+    /// Syringe standard-air volume (L). Portal `vol_sa`.
+    pub vol_sa: f64,
+    /// Syringe water volume (L). Portal `vol_water`.
+    pub vol_water: f64,
+}
+
+impl Default for LabConstants {
+    fn default() -> Self {
+        Self {
+            lab_temp_avg_degc: 22.5,
+            lab_press_avg_atm: 0.957237,
+            vol_sa: 0.03,
+            vol_water: 0.03,
+        }
+    }
+}
+
+/// Operator-entered lab conditions. Every field is optional; a missing value falls
+/// back to the matching `LabConstants` entry. Pressure is entered in hPa, as the
+/// portal stores it, and converted to atm during resolution.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LabEntry {
+    pub lab_temp_c: Option<f64>,
+    pub lab_pressure_hpa: Option<f64>,
+    #[serde(alias = "vol_sa_ml")]
+    pub vol_sa: Option<f64>,
+    #[serde(alias = "vol_water_ml")]
+    pub vol_water: Option<f64>,
+}
+
+/// Resolved lab conditions ready for `co2_headspace`/`pco2_full_pipeline`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabConditions {
+    pub lab_temp_c: f64,
+    pub lab_pressure_atm: f64,
+    pub vol_sa: f64,
+    pub vol_water: f64,
+}
+
+/// Resolve operator lab entries against constants-table defaults.
+///
+/// Mirrors R `calcCO2`: an entered lab pressure is hPa and is divided by 1013.25;
+/// the `lab_press_avg_atm` fallback is already atm and passes through unchanged.
+/// An entered pressure outside 700-1050 hPa is rejected. The two volumes only
+/// enter the calculation as a ratio, so any unit shared by both works; the
+/// constants-table defaults are in litres.
+pub fn resolve_lab_conditions(
+    entry: &LabEntry,
+    constants: &LabConstants,
+) -> Result<LabConditions, String> {
+    let lab_pressure_atm = match entry.lab_pressure_hpa {
+        Some(hpa) => {
+            super::field_data::validate_pressure_hpa(hpa)
+                .map_err(|e| format!("lab_pressure_hpa: {e}"))?
+                / 1013.25
+        }
+        None => constants.lab_press_avg_atm,
+    };
+    Ok(LabConditions {
+        lab_temp_c: entry.lab_temp_c.unwrap_or(constants.lab_temp_avg_degc),
+        lab_pressure_atm,
+        vol_sa: entry.vol_sa.unwrap_or(constants.vol_sa),
+        vol_water: entry.vol_water.unwrap_or(constants.vol_water),
+    })
+}
+
 /// CH4 dry concentration corrected for water vapor.
 ///
 /// From R `calcCH4dry`:
@@ -322,6 +396,37 @@ mod tests {
             (result - expected).abs() < TOL,
             "expected {expected}, got {result}"
         );
+    }
+
+    #[test]
+    fn test_resolve_lab_conditions_all_defaults() {
+        let lc = resolve_lab_conditions(&LabEntry::default(), &LabConstants::default()).unwrap();
+        assert!((lc.lab_temp_c - 22.5).abs() < 1e-12);
+        assert!((lc.lab_pressure_atm - 0.957237).abs() < 1e-12);
+        assert!((lc.vol_sa - 0.03).abs() < 1e-12);
+        assert!((lc.vol_water - 0.03).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_resolve_lab_conditions_hpa_entry_converted() {
+        let entry = LabEntry {
+            lab_pressure_hpa: Some(970.0),
+            ..Default::default()
+        };
+        let lc = resolve_lab_conditions(&entry, &LabConstants::default()).unwrap();
+        // 970 / 1013.25
+        assert!((lc.lab_pressure_atm - 970.0 / 1013.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_resolve_lab_conditions_rejects_out_of_band_pressure() {
+        for hpa in [0.957, 96.0, 699.0, 1051.0] {
+            let entry = LabEntry {
+                lab_pressure_hpa: Some(hpa),
+                ..Default::default()
+            };
+            assert!(resolve_lab_conditions(&entry, &LabConstants::default()).is_err());
+        }
     }
 
     #[test]

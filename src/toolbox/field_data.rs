@@ -37,13 +37,29 @@ pub fn reach_depth_stats(depths: &[f64]) -> (f64, f64) {
     (super::common::mean(depths), super::common::std_dev(depths))
 }
 
+/// Barometric pressure validity band (hPa) from R `calcCO2corr`.
+pub const PRESSURE_HPA_MIN: f64 = 700.0;
+pub const PRESSURE_HPA_MAX: f64 = 1050.0;
+
+/// Validate an operator-entered barometric pressure against the 700-1050 hPa band.
+/// Catches values entered in the wrong unit (atm, kPa) before they skew a calculation.
+pub fn validate_pressure_hpa(pressure_hpa: f64) -> Result<f64, String> {
+    if (PRESSURE_HPA_MIN..=PRESSURE_HPA_MAX).contains(&pressure_hpa) {
+        Ok(pressure_hpa)
+    } else {
+        Err(format!(
+            "pressure {pressure_hpa} is outside the valid {PRESSURE_HPA_MIN}-{PRESSURE_HPA_MAX} hPa band (is the value in hPa?)"
+        ))
+    }
+}
+
 /// Select the best available pressure value.
 ///
 /// From R pattern: use field_pressure if it's in [700, 1050] hPa, else fall back to altitude_pressure.
 #[must_use]
 pub fn select_pressure(field_pressure: Option<f64>, altitude_pressure: Option<f64>) -> Option<f64> {
     if let Some(fp) = field_pressure
-        && (700.0..=1050.0).contains(&fp)
+        && (PRESSURE_HPA_MIN..=PRESSURE_HPA_MAX).contains(&fp)
     {
         return Some(fp);
     }
@@ -95,6 +111,21 @@ mod tests {
             (result - expected).abs() < 0.001,
             "expected {expected}, got {result}"
         );
+    }
+
+    #[test]
+    fn test_validate_pressure_hpa_in_band() {
+        assert_eq!(validate_pressure_hpa(970.0), Ok(970.0));
+        assert_eq!(validate_pressure_hpa(700.0), Ok(700.0));
+        assert_eq!(validate_pressure_hpa(1050.0), Ok(1050.0));
+    }
+
+    #[test]
+    fn test_validate_pressure_hpa_out_of_band() {
+        assert!(validate_pressure_hpa(699.9).is_err());
+        assert!(validate_pressure_hpa(1050.1).is_err());
+        // An atm-scale entry is rejected instead of being silently ~1013x wrong
+        assert!(validate_pressure_hpa(0.957).is_err());
     }
 
     #[test]

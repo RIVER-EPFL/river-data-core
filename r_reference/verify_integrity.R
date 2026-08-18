@@ -1,20 +1,36 @@
 #!/usr/bin/env Rscript
 #
 # Verify that each r_reference/functions/*.R file is a byte-exact
-# extraction from the portal source file.
+# extraction from the portal source file named in its "# File:" header.
 #
 # Usage:
+#   Rscript r_reference/verify_integrity.R <path_to_cnet-data-portal_repo>
 #   Rscript r_reference/verify_integrity.R <path_to_calculation_functions.R>
+#
+# A file argument only covers references extracted from that file; pass the
+# portal repo root to verify every reference.
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 1) {
-  stop("Usage: Rscript verify_integrity.R <path_to_calculation_functions.R>")
+  stop("Usage: Rscript verify_integrity.R <portal_repo_root_or_source_file>")
 }
 
 source_path <- args[1]
-if (!file.exists(source_path)) stop("Source file not found: ", source_path)
+if (!file.exists(source_path)) stop("Source path not found: ", source_path)
 
-source_lines <- readLines(source_path, warn = FALSE)
+# Resolve a reference's "# File:" header to source lines. With a single-file
+# argument, only references whose File basename matches are checkable.
+source_cache <- new.env()
+load_source <- function(rel_path) {
+  if (!is.null(source_cache[[rel_path]])) return(source_cache[[rel_path]])
+  path <- if (dir.exists(source_path)) file.path(source_path, rel_path) else {
+    if (basename(rel_path) == basename(source_path)) source_path else NA_character_
+  }
+  if (is.na(path) || !file.exists(path)) return(NULL)
+  lines <- readLines(path, warn = FALSE)
+  source_cache[[rel_path]] <- lines
+  lines
+}
 
 script_dir <- dirname(sub("--file=", "", commandArgs(trailingOnly = FALSE)[grep("--file=", commandArgs(trailingOnly = FALSE))]))
 if (length(script_dir) == 0) script_dir <- "r_reference"
@@ -31,9 +47,17 @@ for (fpath in sort(files)) {
   ref_lines <- readLines(fpath, warn = FALSE)
 
   line_header <- grep("^# Lines:", ref_lines, value = TRUE)
-  if (length(line_header) == 0) {
-    cat(fname, ": FAIL (no Lines: header found)\n")
+  file_header <- grep("^# File:", ref_lines, value = TRUE)
+  if (length(line_header) == 0 || length(file_header) == 0) {
+    cat(fname, ": FAIL (no Lines:/File: header found)\n")
     failed <- failed + 1
+    next
+  }
+
+  source_lines <- load_source(sub("^# File: ", "", file_header[1]))
+  if (is.null(source_lines)) {
+    cat(fname, ": SKIP (source ", sub("^# File: ", "", file_header[1]),
+        " not reachable from ", source_path, ")\n", sep = "")
     next
   }
 
@@ -44,10 +68,10 @@ for (fpath in sort(files)) {
 
   extracted <- source_lines[start_line:end_line]
 
-  blank_idx <- grep("^#", ref_lines)
-  header_end <- max(blank_idx[blank_idx <= 8], 0)
-  if (header_end > 0 && header_end < length(ref_lines)) {
-    first_non_blank <- header_end + 1
+# The header is the initial comment block up to the first blank line
+  first_blank <- which(trimws(ref_lines) == "")[1]
+  if (!is.na(first_blank) && all(grepl("^#", ref_lines[seq_len(first_blank - 1)]))) {
+    first_non_blank <- first_blank
     while (first_non_blank <= length(ref_lines) && trimws(ref_lines[first_non_blank]) == "") {
       first_non_blank <- first_non_blank + 1
     }
