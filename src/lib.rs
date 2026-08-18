@@ -6,8 +6,6 @@ pub mod models;
 #[cfg(feature = "client")]
 pub mod client;
 
-#[cfg(feature = "toolbox")]
-pub mod toolbox;
 
 pub use chrono;
 pub use serde_json;

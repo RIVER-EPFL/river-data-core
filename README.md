@@ -3,7 +3,7 @@
 **Feed your instrument or spreadsheet data into river-data by implementing two functions.**
 
 river-data-core is the shared library for the [river-data](https://github.com/RIVER-EPFL)
-platform: the sync client, the wire protocol both ends share, and the RIVER lab toolbox.
+platform: the sync client and the wire protocol both ends share.
 A sync service built on it registers its data streams once, then pushes new readings on a
 schedule. Enrollment, heartbeats, retries, token rotation, batching and remote commands
 (pause, resume, trigger a full sync from the dashboard) are all handled for you.
@@ -138,11 +138,9 @@ Variables are also read from a `.env` file in the working directory.
 ## Toolbox
 
 Rust ports of the RIVER lab calculation functions originally written in R, gated behind
-the `toolbox` feature. Each function is tested against the original R output (12,500+
 bulk random cases).
 
 ```bash
-cargo test --features toolbox                         # all tests (unit + golden)
 Rscript r_reference/generate_fixtures.R               # regenerate fixtures (R >= 4.0, jsonlite)
 Rscript r_reference/verify_integrity.R <portal_source.R>   # verify R sources are byte-exact copies
 ```
@@ -151,7 +149,6 @@ Rscript r_reference/verify_integrity.R <portal_source.R>   # verify R sources ar
 
 - `client`: sync service runner, driver and HTTP client (reqwest)
 - `openapi`: `ToSchema` derives on the protocol types, for a host API that publishes a spec
-- `toolbox`: RIVER lab data toolset
 
 The control plane's server side lives in river-data-api, which owns the database schema those
 handlers query. This crate defines the protocol they speak.

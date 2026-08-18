@@ -26,7 +26,6 @@ client = [
 ]
 # Schema derives on the wire protocol types, for a host application that publishes an OpenAPI spec.
 openapi = ["dep:utoipa"]
-toolbox = []
 
 [dependencies]
 # Always
