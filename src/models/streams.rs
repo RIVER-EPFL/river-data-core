@@ -28,6 +28,11 @@ pub struct RegisterStreamRequest {
     /// Stream-level classification declared at discovery. None never clears an operator-set value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub measurement_type: Option<String>,
+    /// The instrument producing this feed. Declaring it stops pairing minting a second,
+    /// serial-less instrument alongside the real one. None leaves the server to resolve the
+    /// sensor from the metadata serial at import or pairing time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sensor_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,10 +101,12 @@ mod tests {
             source_path: None,
             metadata: serde_json::json!({"device": "dev_001"}),
             measurement_type: None,
+            sensor_id: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["source_system"], "test_system");
         assert_eq!(json["metadata"]["device"], "dev_001");
+        assert!(json.get("sensor_id").is_none());
     }
 
     #[test]

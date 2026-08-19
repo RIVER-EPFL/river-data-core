@@ -36,6 +36,7 @@ async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError> 
         source_path: "demo/lab/temperature".to_string(),
         metadata: json!({ "units": "degC" }),
         measurement_type: Some("continuous".to_string()),
+        sensor_id: None,
     }])
 }
 ```
@@ -43,6 +44,9 @@ async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError> 
 `source_key` is the stable identifier on your side (a column name, a location id).
 Keep it stable across restarts: a changed key registers as a new, empty stream.
 `measurement_type` is `"continuous"` for logger data or `"spot"` for grab samples.
+`sensor_id` names the instrument behind the stream when your backend already knows it;
+leave it `None` and the server resolves the instrument from the metadata serial when the
+stream is imported or paired.
 
 Second, fetch new readings. Each request carries `since`, the time of the newest reading
 river-data already has for that stream, so you only return what is new:

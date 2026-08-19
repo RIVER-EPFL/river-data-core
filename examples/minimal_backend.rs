@@ -24,6 +24,7 @@ impl SourceBackend for DemoBackend {
             source_path: "demo/lab/temperature".to_string(),
             metadata: json!({ "units": "degC" }),
             measurement_type: Some("continuous".to_string()),
+            sensor_id: None,
         }])
     }
 

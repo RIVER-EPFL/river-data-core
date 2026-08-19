@@ -75,6 +75,7 @@ impl SyncDriver {
                 source_path: Some(d.source_path.clone()),
                 metadata: d.metadata.clone(),
                 measurement_type: d.measurement_type.clone(),
+                sensor_id: d.sensor_id,
             };
             match self.api.register_stream(&req).await {
                 Ok(_) => registered += 1,

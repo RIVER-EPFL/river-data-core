@@ -69,6 +69,7 @@ impl SourceBackend for FakeBackend {
             source_path: "fake/s1".to_string(),
             metadata: json!({}),
             measurement_type: Some("continuous".to_string()),
+            sensor_id: None,
         }])
     }
 

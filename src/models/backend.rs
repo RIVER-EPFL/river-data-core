@@ -15,6 +15,9 @@ pub struct StreamDescriptor {
     pub metadata: serde_json::Value,
     /// Stream classification ('spot' or 'continuous'); None defers to the API's resolution chain.
     pub measurement_type: Option<String>,
+    /// The instrument producing this stream, when the backend knows it. Declaring it stops
+    /// pairing minting a second, serial-less instrument alongside the real one.
+    pub sensor_id: Option<Uuid>,
 }
 
 /// Asks a backend for readings for one stream since a cursor.

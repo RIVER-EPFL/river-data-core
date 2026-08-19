@@ -66,6 +66,7 @@ impl SourceBackend for CsvFolderBackend {
                     source_key: key,
                     metadata: json!({ "file": path.to_string_lossy() }),
                     measurement_type: None,
+                    sensor_id: None,
                 }
             })
             .collect())
