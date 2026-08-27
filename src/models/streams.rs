@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::models::replicates::ReplicateSpec;
+use crate::models::replicates::{ColumnAssignment, ReplicateSpec};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataStream {
@@ -18,6 +18,12 @@ pub struct DataStream {
     pub measurement_type: Option<String>,
     pub is_active: bool,
     pub last_data_time: Option<chrono::DateTime<chrono::Utc>>,
+    /// The authoritative replicate column-to-index mapping, present on a
+    /// register response for a stream declaring a replicate family. Absent on
+    /// list responses and on APIs that predate pinning; the same list persists
+    /// under `metadata.replicates.assignments`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replicates: Option<Vec<ColumnAssignment>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -160,5 +166,33 @@ mod tests {
         assert_eq!(stream.source_system, "test_system");
         assert!(stream.is_active);
         assert!(stream.site_parameter_id.is_none());
+        assert!(stream.replicates.is_none());
+    }
+
+    #[test]
+    fn register_response_replicates_parse() {
+        let json = serde_json::json!({
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "source_system": "cnet",
+            "source_key": "VAD:DOC_avg_ppb:reps",
+            "source_name": null,
+            "source_path": null,
+            "metadata": {},
+            "site_parameter_id": null,
+            "is_active": true,
+            "last_data_time": null,
+            "replicates": [
+                {"column": "DOC_rep_1", "index": 0},
+                {"column": "DOC_rep_2", "index": 5, "retired": true},
+            ]
+        });
+        let stream: DataStream = serde_json::from_value(json).unwrap();
+        let assignments = stream.replicates.unwrap();
+        assert_eq!(assignments.len(), 2);
+        assert_eq!(assignments[0].index, 0);
+        assert!(!assignments[0].retired);
+        assert_eq!(assignments[1].column, "DOC_rep_2");
+        assert_eq!(assignments[1].index, 5);
+        assert!(assignments[1].retired);
     }
 }

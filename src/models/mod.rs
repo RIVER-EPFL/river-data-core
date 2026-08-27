@@ -11,6 +11,8 @@ pub use protocol::{
     CommandUpdateRequest, EnrollRequest, EnrollResponse, HeartbeatRequest, HeartbeatResponse,
     PendingCommand, SyncEventCreate, SyncEventRef, SyncEventUpdate, SyncResult, SyncTrigger,
 };
-pub use replicates::{CurveMapping, GroupAudit, ReplicateSpec, StandardCurveUpsert};
+pub use replicates::{
+    ColumnAssignment, CurveMapping, GroupAudit, ReplicateSpec, StandardCurveUpsert,
+};
 pub use status::{CommandStatus, ServiceStatus, SyncEventStatus, SyncEventType};
 pub use streams::{DataStream, IngestReading, IngestStatusEvent, RegisterStreamRequest};

@@ -13,7 +13,7 @@ use river_data_core::client::{
     BackendError, RiverDataClient, SourceBackend, StreamDescriptor, StreamFetchRequest,
     StreamReadings, SyncDriver, SyncService,
 };
-use river_data_core::models::{IngestReading, RunnerConfig};
+use river_data_core::models::{ColumnAssignment, IngestReading, RunnerConfig};
 
 fn test_config() -> RunnerConfig {
     RunnerConfig {
@@ -43,6 +43,8 @@ fn stream_json(id: Uuid, source_key: &str, last_data_time: Option<&str>) -> serd
     })
 }
 
+type AppliedAssignments = Arc<Mutex<Vec<(String, Vec<ColumnAssignment>)>>>;
+
 #[derive(Default)]
 struct FakeBackend {
     readings_per_stream: usize,
@@ -50,6 +52,7 @@ struct FakeBackend {
     rediscover: bool,
     fetch_calls: Arc<AtomicU32>,
     fetch_requests: Arc<Mutex<Vec<Vec<StreamFetchRequest>>>>,
+    applied_assignments: AppliedAssignments,
 }
 
 #[async_trait::async_trait]
@@ -72,6 +75,18 @@ impl SourceBackend for FakeBackend {
             sensor_id: None,
             replicates: None,
         }])
+    }
+
+    async fn apply_replicate_assignments(
+        &self,
+        source_key: &str,
+        assignments: &[ColumnAssignment],
+    ) -> Result<(), BackendError> {
+        self.applied_assignments
+            .lock()
+            .unwrap()
+            .push((source_key.to_string(), assignments.to_vec()));
+        Ok(())
     }
 
     async fn fetch_readings(
@@ -110,13 +125,16 @@ async fn harness(backend: FakeBackend, streams: Vec<serde_json::Value>) -> Harne
     let server = MockServer::start().await;
     let total = streams.len();
 
+    // The register response carries the pinned mapping the API authors for a
+    // replicate family; the driver must hand it to the backend.
+    let mut register_body = stream_json(Uuid::new_v4(), "s1", None);
+    register_body["replicates"] = json!([
+        {"column": "m1", "index": 0},
+        {"column": "m2", "index": 5, "retired": true},
+    ]);
     Mock::given(method("POST"))
         .and(path("/api/streams/register"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(stream_json(
-            Uuid::new_v4(),
-            "s1",
-            None,
-        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(register_body))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -409,4 +427,45 @@ async fn test_aggregates_refreshed_after_readings() {
         count(&h.server, "POST", "/api/actions/refresh_aggregates").await,
         1
     );
+}
+
+// Scenario: registration returns the pinned mapping, and a listed stream's
+// metadata persists one from an earlier registration. Expected behaviour: the
+// backend receives both before fetch, keyed by source_key, with retired
+// entries intact.
+#[tokio::test]
+async fn test_replicate_assignments_reach_the_backend() {
+    let applied = Arc::new(Mutex::new(Vec::new()));
+    let backend = FakeBackend {
+        applied_assignments: applied.clone(),
+        ..Default::default()
+    };
+    let mut listed = stream_json(Uuid::new_v4(), "STA:DOC_avg:reps", None);
+    listed["metadata"] = json!({
+        "replicates": {
+            "source_columns": ["DOC_rep_1"],
+            "assignments": [{"column": "DOC_rep_1", "index": 2}],
+        }
+    });
+    let h = harness(backend, vec![listed]).await;
+
+    h.driver.sync(false).await.unwrap();
+
+    let applied = applied.lock().unwrap();
+    let from_register = applied
+        .iter()
+        .find(|(k, _)| k == "s1")
+        .expect("register response mapping applied");
+    assert_eq!(from_register.1.len(), 2);
+    assert_eq!(from_register.1[1].column, "m2");
+    assert_eq!(from_register.1[1].index, 5);
+    assert!(from_register.1[1].retired);
+
+    let from_metadata = applied
+        .iter()
+        .find(|(k, _)| k == "STA:DOC_avg:reps")
+        .expect("persisted metadata mapping applied");
+    assert_eq!(from_metadata.1.len(), 1);
+    assert_eq!(from_metadata.1[0].index, 2);
+    assert!(!from_metadata.1[0].retired);
 }

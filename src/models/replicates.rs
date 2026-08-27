@@ -2,10 +2,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Replicate-family declaration on a stream registration. `source_columns`
-/// position is the replicate_index the member's readings carry, and the API
-/// preserves it unchanged; the API requires at least two unique columns and
-/// `measurement_type: "spot"` on the request.
+/// Replicate-family declaration on a stream registration. The API pins each
+/// column's replicate_index server-side (append-only across re-registrations)
+/// and returns the authoritative mapping as [`ColumnAssignment`]s on the
+/// register response; `source_columns` order is provenance, not the index.
+/// The API requires at least two unique columns and `measurement_type: "spot"`
+/// on the request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplicateSpec {
     pub source_columns: Vec<String>,
@@ -17,6 +19,34 @@ pub struct ReplicateSpec {
     pub curve_ref_column: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calc: Option<String>,
+}
+
+/// One source column's pinned replicate index, as the API's register response
+/// reports it (and as stream metadata persists it under
+/// `replicates.assignments`). Sync services assign each value's
+/// `replicate_index` by looking its source column up here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnAssignment {
+    pub column: String,
+    pub index: i16,
+    /// The source no longer sends this column. The index stays reserved and
+    /// remains the column's identity should it reappear.
+    #[serde(default)]
+    pub retired: bool,
+}
+
+impl ColumnAssignment {
+    /// The pinned mapping a stream's metadata carries, when the API has
+    /// authored one. None on metadata written by an API that predates pinning.
+    pub fn from_metadata(metadata: &serde_json::Value) -> Option<Vec<Self>> {
+        let value = metadata.get("replicates")?.get("assignments")?;
+        let assignments: Vec<Self> = serde_json::from_value(value.clone()).ok()?;
+        if assignments.is_empty() {
+            None
+        } else {
+            Some(assignments)
+        }
+    }
 }
 
 /// Portal-precomputed mean/sd for one replicate group, sent alongside the
@@ -105,6 +135,39 @@ mod tests {
         };
         let json = serde_json::to_value(&audit).unwrap();
         assert_eq!(json["expected_n"], 2);
+    }
+
+    #[test]
+    fn column_assignments_parse_from_metadata() {
+        let metadata = serde_json::json!({
+            "replicates": {
+                "source_columns": ["DOC_rep_1", "DOC_rep_3"],
+                "assignments": [
+                    {"column": "DOC_rep_1", "index": 0},
+                    {"column": "DOC_rep_2", "index": 1, "retired": true},
+                    {"column": "DOC_rep_3", "index": 2, "retired": false},
+                ],
+            },
+        });
+        let assignments = ColumnAssignment::from_metadata(&metadata).unwrap();
+        assert_eq!(assignments.len(), 3);
+        assert_eq!(assignments[0].column, "DOC_rep_1");
+        assert!(!assignments[0].retired);
+        assert_eq!(assignments[1].index, 1);
+        assert!(assignments[1].retired);
+    }
+
+    #[test]
+    fn metadata_without_pinned_assignments_yields_none() {
+        assert!(ColumnAssignment::from_metadata(&serde_json::json!({})).is_none());
+        let unpinned = serde_json::json!({
+            "replicates": {"source_columns": ["a", "b"]},
+        });
+        assert!(ColumnAssignment::from_metadata(&unpinned).is_none());
+        let empty = serde_json::json!({
+            "replicates": {"source_columns": ["a", "b"], "assignments": []},
+        });
+        assert!(ColumnAssignment::from_metadata(&empty).is_none());
     }
 
     #[test]

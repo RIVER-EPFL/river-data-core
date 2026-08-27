@@ -6,7 +6,8 @@ use crate::client::river_data_client::{IngestOptions, RiverDataClient};
 use crate::client::service::SyncService;
 use crate::commands;
 use crate::models::{
-    DataStream, RegisterStreamRequest, RunnerConfig, StreamFetchRequest, StreamReadings, SyncResult,
+    ColumnAssignment, DataStream, RegisterStreamRequest, RunnerConfig, StreamFetchRequest,
+    StreamReadings, SyncResult,
 };
 
 pub const INGEST_BATCH_SIZE: usize = 1000;
@@ -118,7 +119,20 @@ impl SyncDriver {
                 replicates: d.replicates.clone(),
             };
             match self.api.register_stream(&req).await {
-                Ok(_) => registered += 1,
+                Ok(stream) => {
+                    registered += 1;
+                    if let Some(assignments) = &stream.replicates
+                        && let Err(e) = self
+                            .backend
+                            .apply_replicate_assignments(&d.source_key, assignments)
+                            .await
+                    {
+                        tracing::warn!(source_key = %d.source_key, error = %e, "Applying replicate assignments failed");
+                        result
+                            .errors
+                            .push(format!("{}: replicate assignments", d.source_key));
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(source_key = %d.source_key, error = %e, "Stream registration failed");
                     result
@@ -138,12 +152,34 @@ impl SyncDriver {
             .push(format!("Stream discovery: {registered} streams registered"));
     }
 
+    /// Hand the backend the pinned replicate mapping each listed stream's
+    /// metadata persists. The register response already delivered the fresh
+    /// copy on cycles that ran discovery; this covers cycles that skipped it
+    /// and the resync command, so index assignment never falls back to column
+    /// position merely because discovery did not run in this process.
+    async fn apply_persisted_assignments(&self, streams: &[DataStream]) {
+        for s in streams {
+            let Some(assignments) = ColumnAssignment::from_metadata(&s.metadata) else {
+                continue;
+            };
+            if let Err(e) = self
+                .backend
+                .apply_replicate_assignments(&s.source_key, &assignments)
+                .await
+            {
+                tracing::warn!(source_key = %s.source_key, error = %e, "Applying replicate assignments failed");
+            }
+        }
+    }
+
     async fn sync_readings_once(&self, full: bool) -> Result<ReadingsOutcome, String> {
         let streams = self
             .api
             .list_streams(Some(self.backend.source_system()), Some(true))
             .await
             .map_err(|e| format!("list streams: {e}"))?;
+
+        self.apply_persisted_assignments(&streams).await;
 
         let requests: Vec<StreamFetchRequest> = streams
             .iter()
@@ -270,6 +306,8 @@ impl SyncDriver {
             .list_streams(Some(self.backend.source_system()), None)
             .await
             .map_err(|e| format!("list streams: {e}"))?;
+
+        self.apply_persisted_assignments(&streams).await;
 
         let wanted: std::collections::HashSet<&str> =
             payload.source_keys.iter().map(String::as_str).collect();

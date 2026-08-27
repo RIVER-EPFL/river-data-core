@@ -1,6 +1,6 @@
 use crate::models::{
-    CurveMapping, DataStream, StandardCurveUpsert, StreamDescriptor, StreamFetchRequest,
-    StreamReadings, StreamStatusEvents,
+    ColumnAssignment, CurveMapping, DataStream, StandardCurveUpsert, StreamDescriptor,
+    StreamFetchRequest, StreamReadings, StreamStatusEvents,
 };
 
 pub type BackendError = Box<dyn std::error::Error + Send + Sync>;
@@ -31,6 +31,20 @@ pub trait SourceBackend: Send + Sync + 'static {
     /// Receives the API-side identities the discovered curves resolved to, so
     /// the backend can stamp readings with curve UUIDs. Default: ignored.
     async fn apply_curve_mappings(&self, _mappings: &[CurveMapping]) -> Result<(), BackendError> {
+        Ok(())
+    }
+
+    /// Receives the authoritative replicate column-to-index mapping for one
+    /// family stream, as the API pinned it. The driver calls this whenever it
+    /// learns a mapping (register response, or the copy persisted on stream
+    /// metadata), before it asks for readings; the backend must assign each
+    /// value's `replicate_index` from the mapping rather than from column
+    /// position. Default: ignored, for sources without replicate families.
+    async fn apply_replicate_assignments(
+        &self,
+        _source_key: &str,
+        _assignments: &[ColumnAssignment],
+    ) -> Result<(), BackendError> {
         Ok(())
     }
 
