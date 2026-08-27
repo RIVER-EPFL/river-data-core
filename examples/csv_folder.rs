@@ -66,6 +66,8 @@ impl SourceBackend for CsvFolderBackend {
                     source_key: key,
                     metadata: json!({ "file": path.to_string_lossy() }),
                     measurement_type: None,
+                    sensor_id: None,
+                    replicates: None,
                 }
             })
             .collect())
@@ -88,11 +90,11 @@ impl SourceBackend for CsvFolderBackend {
                 .map(|(time, value)| IngestReading::new(time, value))
                 .collect();
 
-            out.push(StreamReadings {
-                stream_id: req.stream_id,
-                source_key: req.source_key.clone(),
+            out.push(StreamReadings::new(
+                req.stream_id,
+                req.source_key.clone(),
                 readings,
-            });
+            ));
         }
         Ok(out)
     }

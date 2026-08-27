@@ -24,6 +24,8 @@ impl SourceBackend for DemoBackend {
             source_path: "demo/lab/temperature".to_string(),
             metadata: json!({ "units": "degC" }),
             measurement_type: Some("continuous".to_string()),
+            sensor_id: None,
+            replicates: None,
         }])
     }
 
@@ -44,11 +46,7 @@ impl SourceBackend for DemoBackend {
                     readings.push(IngestReading::new(t, 15.0 + 5.0 * hours.sin()));
                     t += Duration::minutes(10);
                 }
-                StreamReadings {
-                    stream_id: req.stream_id,
-                    source_key: req.source_key.clone(),
-                    readings,
-                }
+                StreamReadings::new(req.stream_id, req.source_key.clone(), readings)
             })
             .collect())
     }

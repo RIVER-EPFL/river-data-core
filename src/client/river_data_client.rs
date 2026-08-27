@@ -4,8 +4,8 @@ use uuid::Uuid;
 
 use crate::error::RiverDataClientError;
 use crate::models::{
-    CommandStatus, DataStream, IngestReading, IngestStatusEvent, RegisterStreamRequest,
-    SyncEventCreate, SyncEventRef, SyncEventUpdate,
+    CommandStatus, CurveMapping, DataStream, GroupAudit, IngestReading, IngestStatusEvent,
+    RegisterStreamRequest, StandardCurveUpsert, SyncEventCreate, SyncEventRef, SyncEventUpdate,
 };
 
 pub struct RiverDataClient {
@@ -25,6 +25,10 @@ pub struct IngestOutcome {
     pub skipped: u64,
     /// One entry per rejection kind, with its count.
     pub skipped_reasons: Vec<String>,
+    /// Readings withheld pending audit acknowledgement. The API caps the
+    /// stream cursor below the earliest held group, so the next incremental
+    /// fetch re-sends them; no client-side handling beyond reporting.
+    pub held: u64,
 }
 
 /// Outcome of a chunked ingest.
@@ -33,9 +37,56 @@ pub struct BatchedIngest {
     pub inserted: u64,
     pub skipped: u64,
     pub skipped_reasons: Vec<String>,
+    pub held: u64,
     pub failed_batches: usize,
     /// Readings not attempted because an earlier batch failed.
     pub deferred: usize,
+}
+
+/// Per-request ingest flags and audit payload.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct IngestOptions<'a> {
+    /// Update existing rows in place (sync services only).
+    pub overwrite: bool,
+    /// Mark the readings as replicate collections.
+    pub collection: bool,
+    /// Group audits; each request carries only the entries whose time falls
+    /// inside that chunk.
+    pub audits: &'a [GroupAudit],
+}
+
+/// Split readings into chunks of at most `batch_size` rows without splitting a
+/// run of identical timestamps across requests. `readings` must be sorted by
+/// time; a replicate group split mid-request would be audited (and held)
+/// against half its members, stranding the rest behind the cursor.
+/// A single run larger than `batch_size` becomes one oversized chunk.
+fn group_safe_chunks(readings: &[IngestReading], batch_size: usize) -> Vec<&[IngestReading]> {
+    let batch_size = batch_size.max(1);
+    let mut chunks = Vec::new();
+    let mut start = 0usize;
+    while start < readings.len() {
+        let mut end = (start + batch_size).min(readings.len());
+        if end < readings.len() {
+            let boundary_time = readings[end - 1].time;
+            if readings[end].time == boundary_time {
+                // Grow to cover the whole run when the run spans the cut.
+                while end < readings.len() && readings[end].time == boundary_time {
+                    end += 1;
+                }
+                // Prefer cutting before the run when that leaves a non-empty chunk.
+                let mut run_start = end;
+                while run_start > start && readings[run_start - 1].time == boundary_time {
+                    run_start -= 1;
+                }
+                if run_start > start && end - start > batch_size {
+                    end = run_start;
+                }
+            }
+        }
+        chunks.push(&readings[start..end]);
+        start = end;
+    }
+    chunks
 }
 
 impl RiverDataClient {
@@ -175,6 +226,16 @@ impl RiverDataClient {
         stream_id: Uuid,
         readings: &[IngestReading],
     ) -> Result<IngestOutcome, RiverDataClientError> {
+        self.ingest_readings_with(stream_id, readings, IngestOptions::default())
+            .await
+    }
+
+    pub async fn ingest_readings_with(
+        &self,
+        stream_id: Uuid,
+        readings: &[IngestReading],
+        opts: IngestOptions<'_>,
+    ) -> Result<IngestOutcome, RiverDataClientError> {
         #[derive(serde::Deserialize)]
         struct IngestResponse {
             inserted: u64,
@@ -183,12 +244,25 @@ impl RiverDataClient {
             skipped: u64,
             #[serde(default)]
             skipped_reasons: Vec<String>,
+            // Absent on an API older than replicate audits.
+            #[serde(default)]
+            held: u64,
         }
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "stream_id": stream_id,
             "readings": readings,
         });
+        if opts.overwrite {
+            body["overwrite"] = serde_json::Value::Bool(true);
+        }
+        if opts.collection {
+            body["collection"] = serde_json::Value::Bool(true);
+        }
+        if !opts.audits.is_empty() {
+            body["audit"] = serde_json::to_value(opts.audits)
+                .map_err(|e| RiverDataClientError::Api(format!("serialize audits: {e}")))?;
+        }
         let resp = self
             .http_client
             .post(self.url("/ingest"))
@@ -206,6 +280,7 @@ impl RiverDataClient {
             inserted: result.inserted,
             skipped: result.skipped,
             skipped_reasons: result.skipped_reasons,
+            held: result.held,
         })
     }
 
@@ -250,21 +325,52 @@ impl RiverDataClient {
         readings: &[IngestReading],
         batch_size: usize,
     ) -> BatchedIngest {
+        self.ingest_readings_batched_with(stream_id, readings, batch_size, IngestOptions::default())
+            .await
+    }
+
+    pub async fn ingest_readings_batched_with(
+        &self,
+        stream_id: Uuid,
+        readings: &[IngestReading],
+        batch_size: usize,
+        opts: IngestOptions<'_>,
+    ) -> BatchedIngest {
         // The server cursor is forward-only and moves to the newest reading it
         // accepted, so a chunk out of time order can carry the cursor past rows
         // a later chunk still has to send. Sorting here makes the ascending
-        // order the contract depends on hold for every backend.
+        // order the contract depends on hold for every backend. The secondary
+        // replicate_index key keeps a group's members in index order within a
+        // request.
         let mut ordered = readings.to_vec();
-        ordered.sort_by_key(|r| r.time);
+        ordered.sort_by_key(|r| (r.time, r.replicate_index));
 
         let mut result = BatchedIngest::default();
         let mut sent = 0usize;
-        for chunk in ordered.chunks(batch_size.max(1)) {
-            match self.ingest_readings(stream_id, chunk).await {
+        for chunk in group_safe_chunks(&ordered, batch_size) {
+            // Only the audits for groups in this chunk; group-safe chunking
+            // guarantees a group's time falls in exactly one chunk.
+            let (first, last) = (chunk[0].time, chunk[chunk.len() - 1].time);
+            let chunk_audits: Vec<GroupAudit> = opts
+                .audits
+                .iter()
+                .filter(|a| a.time >= first && a.time <= last)
+                .cloned()
+                .collect();
+            let chunk_opts = IngestOptions {
+                overwrite: opts.overwrite,
+                collection: opts.collection,
+                audits: &chunk_audits,
+            };
+            match self
+                .ingest_readings_with(stream_id, chunk, chunk_opts)
+                .await
+            {
                 Ok(outcome) => {
                     result.inserted += outcome.inserted;
                     result.skipped += outcome.skipped;
                     result.skipped_reasons.extend(outcome.skipped_reasons);
+                    result.held += outcome.held;
                     sent += chunk.len();
                 }
                 Err(e) => {
@@ -276,6 +382,55 @@ impl RiverDataClient {
             }
         }
         result
+    }
+
+    // ========================================================================
+    // Standard Curves
+    // ========================================================================
+
+    /// Register portal standard curves; idempotent per (source_system,
+    /// source_key). Returns the API-side identity of every curve registered.
+    pub async fn register_standard_curves(
+        &self,
+        source_system: &str,
+        curves: &[StandardCurveUpsert],
+    ) -> Result<Vec<CurveMapping>, RiverDataClientError> {
+        #[derive(serde::Deserialize)]
+        struct CurveResponse {
+            id: Uuid,
+            sensor_id: Uuid,
+            #[serde(default)]
+            superseded: bool,
+        }
+
+        let mut mappings = Vec::with_capacity(curves.len());
+        for curve in curves {
+            let mut body = serde_json::to_value(curve)
+                .map_err(|e| RiverDataClientError::Api(format!("serialize curve: {e}")))?;
+            body["source_system"] = serde_json::Value::String(source_system.to_string());
+            let resp = self
+                .http_client
+                .post(self.url("/standard_curves/register"))
+                .bearer_auth(self.current_token())
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| {
+                    RiverDataClientError::Api(format!("register_standard_curve failed: {e}"))
+                })?;
+            self.check_response(&resp)?;
+            let parsed: CurveResponse = resp
+                .json()
+                .await
+                .map_err(|e| RiverDataClientError::Api(format!("parse curve response: {e}")))?;
+            mappings.push(CurveMapping {
+                source_key: curve.source_key.clone(),
+                id: parsed.id,
+                sensor_id: parsed.sensor_id,
+                superseded: parsed.superseded,
+            });
+        }
+        Ok(mappings)
     }
 
     // ========================================================================
@@ -419,6 +574,88 @@ mod tests {
         let resp = http::Response::builder().body("").unwrap();
         let resp: reqwest::Response = resp.into();
         assert_eq!(RiverDataClient::parse_content_range_total(&resp), None);
+    }
+
+    fn reading_at(secs: i64, idx: i16) -> IngestReading {
+        IngestReading {
+            replicate_index: idx,
+            ..IngestReading::new(
+                chrono::DateTime::from_timestamp(secs, 0).unwrap(),
+                secs as f64,
+            )
+        }
+    }
+
+    #[test]
+    fn chunks_respect_batch_size_on_distinct_timestamps() {
+        let readings: Vec<_> = (0..10).map(|s| reading_at(s, 0)).collect();
+        let chunks = group_safe_chunks(&readings, 4);
+        assert_eq!(
+            chunks.iter().map(|c| c.len()).collect::<Vec<_>>(),
+            vec![4, 4, 2]
+        );
+    }
+
+    #[test]
+    fn a_replicate_group_is_never_split_across_chunks() {
+        // Groups: t0 (1 row), t1 (3 rows), t2 (2 rows). Batch size 3 would cut
+        // the t1 group after its second member.
+        let readings = vec![
+            reading_at(0, 0),
+            reading_at(1, 0),
+            reading_at(1, 1),
+            reading_at(1, 2),
+            reading_at(2, 0),
+            reading_at(2, 1),
+        ];
+        let chunks = group_safe_chunks(&readings, 3);
+        for chunk in &chunks {
+            let first = chunk[0].time;
+            let last = chunk[chunk.len() - 1].time;
+            for other in &chunks {
+                if !std::ptr::eq(*chunk, *other) {
+                    for r in *other {
+                        assert!(
+                            r.time != first && r.time != last,
+                            "timestamp run split across chunks"
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            chunks.iter().map(|c| c.len()).collect::<Vec<_>>(),
+            vec![1, 3, 2]
+        );
+    }
+
+    #[test]
+    fn a_group_larger_than_the_batch_size_is_one_oversized_chunk() {
+        let readings: Vec<_> = (0..5).map(|i| reading_at(7, i)).collect();
+        let chunks = group_safe_chunks(&readings, 3);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].len(), 5);
+    }
+
+    #[test]
+    fn the_cut_moves_before_a_run_that_spans_the_boundary() {
+        let readings = vec![
+            reading_at(0, 0),
+            reading_at(0, 1),
+            reading_at(1, 0),
+            reading_at(1, 1),
+            reading_at(1, 2),
+        ];
+        let chunks = group_safe_chunks(&readings, 3);
+        assert_eq!(
+            chunks.iter().map(|c| c.len()).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+    }
+
+    #[test]
+    fn empty_input_yields_no_chunks() {
+        assert!(group_safe_chunks(&[], 100).is_empty());
     }
 
     #[test]

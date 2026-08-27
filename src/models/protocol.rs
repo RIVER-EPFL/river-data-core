@@ -100,6 +100,10 @@ pub struct SyncResult {
     /// predates the field must still parse the rest.
     #[serde(default)]
     pub readings_skipped: u64,
+    /// Readings withheld pending audit acknowledgement; the API re-sends them
+    /// on the next incremental fetch.
+    #[serde(default)]
+    pub readings_held: u64,
     pub status_events_synced: u64,
     pub full_sync: bool,
     pub duration_ms: u64,

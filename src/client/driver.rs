@@ -2,10 +2,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::client::backend::SourceBackend;
-use crate::client::river_data_client::RiverDataClient;
+use crate::client::river_data_client::{IngestOptions, RiverDataClient};
 use crate::client::service::SyncService;
+use crate::commands;
 use crate::models::{
-    DataStream, RegisterStreamRequest, RunnerConfig, StreamFetchRequest, SyncResult,
+    DataStream, RegisterStreamRequest, RunnerConfig, StreamFetchRequest, StreamReadings, SyncResult,
 };
 
 pub const INGEST_BATCH_SIZE: usize = 1000;
@@ -36,6 +37,7 @@ struct ReadingsOutcome {
     streams: Vec<DataStream>,
     readings_synced: u64,
     readings_skipped: u64,
+    readings_held: u64,
     streams_with_data: usize,
     log: Vec<String>,
     errors: Vec<String>,
@@ -54,6 +56,43 @@ impl SyncDriver {
             retry_delay_secs: config.retry_delay_secs,
             discovered: AtomicBool::new(false),
         }
+    }
+
+    /// Register the backend's standard curves and hand the resulting mappings
+    /// back. Runs before stream registration: curve-carrying descriptors need
+    /// the mapped sensor ids, and readings need the curve UUIDs.
+    async fn sync_curves(&self, result: &mut SyncResult) {
+        let curves = match self.backend.discover_standard_curves().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "Standard curve discovery failed");
+                result.errors.push(format!("Curve discovery: {e}"));
+                return;
+            }
+        };
+        if curves.is_empty() {
+            return;
+        }
+        let mappings = match self
+            .api
+            .register_standard_curves(self.backend.source_system(), &curves)
+            .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(error = %e, "Standard curve registration failed");
+                result.errors.push(format!("Curve registration: {e}"));
+                return;
+            }
+        };
+        if let Err(e) = self.backend.apply_curve_mappings(&mappings).await {
+            tracing::warn!(error = %e, "Applying curve mappings failed");
+            result.errors.push(format!("Curve mappings: {e}"));
+            return;
+        }
+        result
+            .log
+            .push(format!("Standard curves: {} registered", mappings.len()));
     }
 
     async fn discover(&self, result: &mut SyncResult) {
@@ -75,6 +114,8 @@ impl SyncDriver {
                 source_path: Some(d.source_path.clone()),
                 metadata: d.metadata.clone(),
                 measurement_type: d.measurement_type.clone(),
+                sensor_id: d.sensor_id,
+                replicates: d.replicates.clone(),
             };
             match self.api.register_stream(&req).await {
                 Ok(_) => registered += 1,
@@ -123,21 +164,39 @@ impl SyncDriver {
             streams,
             readings_synced: 0,
             readings_skipped: 0,
+            readings_held: 0,
             streams_with_data: 0,
             log: Vec::new(),
             errors: Vec::new(),
         };
 
-        for sr in &fetched {
+        self.ingest_fetched(&fetched, false, &mut outcome).await;
+
+        Ok(outcome)
+    }
+
+    async fn ingest_fetched(
+        &self,
+        fetched: &[StreamReadings],
+        overwrite: bool,
+        outcome: &mut ReadingsOutcome,
+    ) {
+        for sr in fetched {
             if sr.readings.is_empty() {
                 continue;
             }
+            let opts = IngestOptions {
+                overwrite,
+                collection: sr.collection,
+                audits: &sr.audits,
+            };
             let batch = self
                 .api
-                .ingest_readings_batched(sr.stream_id, &sr.readings, INGEST_BATCH_SIZE)
+                .ingest_readings_batched_with(sr.stream_id, &sr.readings, INGEST_BATCH_SIZE, opts)
                 .await;
             outcome.readings_synced += batch.inserted;
             outcome.readings_skipped += batch.skipped;
+            outcome.readings_held += batch.held;
             if batch.failed_batches > 0 {
                 outcome.errors.push(format!(
                     "{}: ingest failed, {} readings deferred to next cycle",
@@ -147,7 +206,7 @@ impl SyncDriver {
             if batch.inserted > 0 {
                 outcome.streams_with_data += 1;
             }
-            if batch.inserted > 0 || batch.skipped > 0 {
+            if batch.inserted > 0 || batch.skipped > 0 || batch.held > 0 {
                 let mut line = format!("{}: {} new readings", sr.source_key, batch.inserted);
                 if batch.skipped > 0 {
                     line.push_str(&format!(
@@ -156,10 +215,16 @@ impl SyncDriver {
                         batch.skipped_reasons.join("; ")
                     ));
                 }
+                if batch.held > 0 {
+                    line.push_str(&format!(
+                        ", {} held pending audit acknowledgement",
+                        batch.held
+                    ));
+                }
                 if outcome.log.len() < MAX_LOG_LINES {
                     outcome.log.push(line);
                 } else {
-                    tracing::debug!(source_key = %sr.source_key, inserted = batch.inserted, skipped = batch.skipped, "Stream ingest");
+                    tracing::debug!(source_key = %sr.source_key, inserted = batch.inserted, skipped = batch.skipped, held = batch.held, "Stream ingest");
                 }
             }
             // A wholly refused stream must surface as a partial cycle, which the runner derives
@@ -175,8 +240,85 @@ impl SyncDriver {
                 ));
             }
         }
+    }
 
-        Ok(outcome)
+    /// RESYNC_STREAMS: fetch the named streams from the start of history and
+    /// ingest with overwrite, leaving flags and sample links untouched.
+    async fn resync_streams(
+        &self,
+        payload: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        #[derive(serde::Deserialize)]
+        struct ResyncPayload {
+            source_keys: Vec<String>,
+            #[serde(default = "default_true")]
+            overwrite: bool,
+        }
+        fn default_true() -> bool {
+            true
+        }
+
+        let payload: ResyncPayload =
+            serde_json::from_value(payload.ok_or("resync_streams requires a payload")?)
+                .map_err(|e| format!("resync_streams payload: {e}"))?;
+        if payload.source_keys.is_empty() {
+            return Err("resync_streams: source_keys is empty".into());
+        }
+
+        let streams = self
+            .api
+            .list_streams(Some(self.backend.source_system()), None)
+            .await
+            .map_err(|e| format!("list streams: {e}"))?;
+
+        let wanted: std::collections::HashSet<&str> =
+            payload.source_keys.iter().map(String::as_str).collect();
+        let requests: Vec<StreamFetchRequest> = streams
+            .iter()
+            .filter(|s| wanted.contains(s.source_key.as_str()))
+            .map(|s| StreamFetchRequest {
+                stream_id: s.id,
+                source_key: s.source_key.clone(),
+                since: None,
+            })
+            .collect();
+        let missing: Vec<&str> = payload
+            .source_keys
+            .iter()
+            .map(String::as_str)
+            .filter(|k| !requests.iter().any(|r| r.source_key == *k))
+            .collect();
+        if !missing.is_empty() {
+            tracing::warn!(?missing, "resync_streams: source keys not registered");
+        }
+
+        let fetched = self
+            .backend
+            .fetch_readings(&requests)
+            .await
+            .map_err(|e| format!("fetch readings: {e}"))?;
+
+        let mut outcome = ReadingsOutcome {
+            streams: Vec::new(),
+            readings_synced: 0,
+            readings_skipped: 0,
+            readings_held: 0,
+            streams_with_data: 0,
+            log: Vec::new(),
+            errors: Vec::new(),
+        };
+        self.ingest_fetched(&fetched, payload.overwrite, &mut outcome)
+            .await;
+
+        Ok(serde_json::json!({
+            "streams_requested": payload.source_keys.len(),
+            "streams_matched": requests.len(),
+            "unmatched_source_keys": missing,
+            "readings_synced": outcome.readings_synced,
+            "readings_skipped": outcome.readings_skipped,
+            "readings_held": outcome.readings_held,
+            "errors": outcome.errors,
+        }))
     }
 
     /// `retry_max` counts retries after the first attempt, matching the
@@ -236,6 +378,10 @@ impl SyncService for SyncDriver {
     ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
         let mut result = SyncResult::default();
 
+        // Curves before registration and fetch: descriptors and readings both
+        // depend on the mappings.
+        self.sync_curves(&mut result).await;
+
         if full || !self.discovered.load(Ordering::Relaxed) || self.backend.rediscover_every_cycle()
         {
             self.discover(&mut result).await;
@@ -247,11 +393,13 @@ impl SyncService for SyncDriver {
             Ok((outcome, retries)) => {
                 result.readings_synced = outcome.readings_synced;
                 result.readings_skipped = outcome.readings_skipped;
+                result.readings_held = outcome.readings_held;
                 result.log.push(format!(
-                    "Readings sync: {} readings across {} streams, {} skipped ({} retries)",
+                    "Readings sync: {} readings across {} streams, {} skipped, {} held ({} retries)",
                     outcome.readings_synced,
                     outcome.streams_with_data,
                     outcome.readings_skipped,
+                    outcome.readings_held,
                     retries
                 ));
                 result.log.extend(outcome.log);
@@ -293,6 +441,9 @@ impl SyncService for SyncDriver {
         command: &str,
         payload: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        if command == commands::RESYNC_STREAMS {
+            return self.resync_streams(payload).await;
+        }
         self.backend.handle_command(command, payload).await
     }
 

@@ -69,6 +69,8 @@ impl SourceBackend for FakeBackend {
             source_path: "fake/s1".to_string(),
             metadata: json!({}),
             measurement_type: Some("continuous".to_string()),
+            sensor_id: None,
+            replicates: None,
         }])
     }
 
@@ -84,14 +86,16 @@ impl SourceBackend for FakeBackend {
         let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
         Ok(requests
             .iter()
-            .map(|r| StreamReadings {
-                stream_id: r.stream_id,
-                source_key: r.source_key.clone(),
-                readings: (0..self.readings_per_stream)
-                    .map(|i| {
-                        IngestReading::new(base + chrono::Duration::seconds(i as i64), i as f64)
-                    })
-                    .collect(),
+            .map(|r| {
+                StreamReadings::new(
+                    r.stream_id,
+                    r.source_key.clone(),
+                    (0..self.readings_per_stream)
+                        .map(|i| {
+                            IngestReading::new(base + chrono::Duration::seconds(i as i64), i as f64)
+                        })
+                        .collect(),
+                )
             })
             .collect())
     }

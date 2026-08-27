@@ -11,6 +11,6 @@ pub use backend::{BackendError, SourceBackend};
 pub use bootstrap::run_sync_service;
 pub use control_plane::ControlPlaneClient;
 pub use driver::{INGEST_BATCH_SIZE, SyncDriver};
-pub use river_data_client::{BatchedIngest, RiverDataClient};
+pub use river_data_client::{BatchedIngest, IngestOptions, IngestOutcome, RiverDataClient};
 pub use runner::SyncServiceRunner;
 pub use service::SyncService;
