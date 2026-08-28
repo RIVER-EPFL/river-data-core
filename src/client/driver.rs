@@ -181,12 +181,20 @@ impl SyncDriver {
 
         self.apply_persisted_assignments(&streams).await;
 
+        // A reconciled backend re-reads its source's full content every cycle: the cursor is
+        // what would truncate the payload below the stored maximum and turn a completeness
+        // window into a mass withdrawal, so it is never applied there.
+        let reconciled = self.backend.reconciled();
         let requests: Vec<StreamFetchRequest> = streams
             .iter()
             .map(|s| StreamFetchRequest {
                 stream_id: s.id,
                 source_key: s.source_key.clone(),
-                since: if full { None } else { s.last_data_time },
+                since: if full || reconciled {
+                    None
+                } else {
+                    s.last_data_time
+                },
             })
             .collect();
 
@@ -218,13 +226,18 @@ impl SyncDriver {
         outcome: &mut ReadingsOutcome,
     ) {
         for sr in fetched {
-            if sr.readings.is_empty() {
+            // An empty payload with no completeness claim is nothing to do. With a window it is
+            // a claim the source holds nothing there, which the server must see: it either
+            // no-ops (nothing stored) or refuses loudly (the store holds rows the claim says
+            // do not exist), and silence would hide exactly that case.
+            if sr.readings.is_empty() && sr.window.is_none() {
                 continue;
             }
             let opts = IngestOptions {
                 overwrite,
                 collection: sr.collection,
                 audits: &sr.audits,
+                window: sr.window.as_ref(),
             };
             let batch = self
                 .api
@@ -233,6 +246,17 @@ impl SyncDriver {
             outcome.readings_synced += batch.inserted;
             outcome.readings_skipped += batch.skipped;
             outcome.readings_held += batch.held;
+            if batch.changed > 0 || batch.withdrawn > 0 {
+                let line = format!(
+                    "{}: converged on source ({} corrected, {} withdrawn)",
+                    sr.source_key, batch.changed, batch.withdrawn
+                );
+                if outcome.log.len() < MAX_LOG_LINES {
+                    outcome.log.push(line);
+                } else {
+                    tracing::info!(source_key = %sr.source_key, changed = batch.changed, withdrawn = batch.withdrawn, "Windowed convergence");
+                }
+            }
             if batch.failed_batches > 0 {
                 outcome.errors.push(format!(
                     "{}: ingest failed, {} readings deferred to next cycle",

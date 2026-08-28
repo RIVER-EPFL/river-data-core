@@ -29,6 +29,12 @@ pub struct IngestOutcome {
     /// stream cursor below the earliest held group, so the next incremental
     /// fetch re-sends them; no client-side handling beyond reporting.
     pub held: u64,
+    /// Windowed diff: stored rows whose source value changed and were corrected in place.
+    pub changed: u64,
+    /// Windowed diff: stored rows absent from the claimed window, stamped withdrawn.
+    pub withdrawn: u64,
+    /// Windowed diff: stored rows the payload re-sent unchanged (proof the pass looked).
+    pub unchanged: u64,
 }
 
 /// Outcome of a chunked ingest.
@@ -38,6 +44,9 @@ pub struct BatchedIngest {
     pub skipped: u64,
     pub skipped_reasons: Vec<String>,
     pub held: u64,
+    pub changed: u64,
+    pub withdrawn: u64,
+    pub unchanged: u64,
     pub failed_batches: usize,
     /// Readings not attempted because an earlier batch failed.
     pub deferred: usize,
@@ -53,6 +62,10 @@ pub struct IngestOptions<'a> {
     /// Group audits; each request carries only the entries whose time falls
     /// inside that chunk.
     pub audits: &'a [GroupAudit],
+    /// Completeness claim: the payload is the source's complete content over the window. The
+    /// server diffs and converges; a request carrying one is never chunked, because each chunk
+    /// would claim the whole window with a partial payload.
+    pub window: Option<&'a crate::models::SourceWindow>,
 }
 
 /// Split readings into chunks of at most `batch_size` rows without splitting a
@@ -247,6 +260,18 @@ impl RiverDataClient {
             // Absent on an API older than replicate audits.
             #[serde(default)]
             held: u64,
+            // Windowed diff counts; absent on an API older than reconciliation.
+            #[serde(default)]
+            changed: u64,
+            #[serde(default)]
+            withdrawn: u64,
+            #[serde(default)]
+            unchanged: u64,
+            // The window the server accepted, echoed back. A missing echo on a request that
+            // carried a window means the API silently ignored the claim (an older image), and
+            // treating that as success would downgrade the source to append mode with no record.
+            #[serde(default)]
+            accepted_window: Option<serde_json::Value>,
         }
 
         let mut body = serde_json::json!({
@@ -263,6 +288,10 @@ impl RiverDataClient {
             body["audit"] = serde_json::to_value(opts.audits)
                 .map_err(|e| RiverDataClientError::Api(format!("serialize audits: {e}")))?;
         }
+        if let Some(window) = opts.window {
+            body["window"] = serde_json::to_value(window)
+                .map_err(|e| RiverDataClientError::Api(format!("serialize window: {e}")))?;
+        }
         let resp = self
             .http_client
             .post(self.url("/ingest"))
@@ -276,11 +305,20 @@ impl RiverDataClient {
             .json()
             .await
             .map_err(|e| RiverDataClientError::Api(format!("parse ingest response: {e}")))?;
+        if opts.window.is_some() && result.accepted_window.is_none() {
+            return Err(RiverDataClientError::Api(
+                "the API did not echo the completeness window; it is running an image without                  windowed reconciliation and the claim was silently ignored"
+                    .to_string(),
+            ));
+        }
         Ok(IngestOutcome {
             inserted: result.inserted,
             skipped: result.skipped,
             skipped_reasons: result.skipped_reasons,
             held: result.held,
+            changed: result.changed,
+            withdrawn: result.withdrawn,
+            unchanged: result.unchanged,
         })
     }
 
@@ -346,6 +384,29 @@ impl RiverDataClient {
         ordered.sort_by_key(|r| (r.time, r.replicate_index));
 
         let mut result = BatchedIngest::default();
+
+        // A completeness claim covers the whole payload, so it goes out as one request: each
+        // chunk would otherwise claim the full window while carrying a fraction of it, and the
+        // server would withdraw the rest.
+        if opts.window.is_some() {
+            match self.ingest_readings_with(stream_id, &ordered, opts).await {
+                Ok(outcome) => {
+                    result.inserted += outcome.inserted;
+                    result.skipped += outcome.skipped;
+                    result.skipped_reasons.extend(outcome.skipped_reasons);
+                    result.held += outcome.held;
+                    result.changed += outcome.changed;
+                    result.withdrawn += outcome.withdrawn;
+                    result.unchanged += outcome.unchanged;
+                }
+                Err(e) => {
+                    tracing::warn!(%stream_id, batch_len = ordered.len(), error = %e, "Windowed ingest failed; the window will be re-asserted next cycle");
+                    result.failed_batches += 1;
+                    result.deferred = readings.len();
+                }
+            }
+            return result;
+        }
         let mut sent = 0usize;
         for chunk in group_safe_chunks(&ordered, batch_size) {
             // Only the audits for groups in this chunk; group-safe chunking
@@ -361,6 +422,7 @@ impl RiverDataClient {
                 overwrite: opts.overwrite,
                 collection: opts.collection,
                 audits: &chunk_audits,
+                window: None,
             };
             match self
                 .ingest_readings_with(stream_id, chunk, chunk_opts)
@@ -371,6 +433,9 @@ impl RiverDataClient {
                     result.skipped += outcome.skipped;
                     result.skipped_reasons.extend(outcome.skipped_reasons);
                     result.held += outcome.held;
+                    result.changed += outcome.changed;
+                    result.withdrawn += outcome.withdrawn;
+                    result.unchanged += outcome.unchanged;
                     sent += chunk.len();
                 }
                 Err(e) => {
@@ -482,18 +547,36 @@ impl RiverDataClient {
         &self,
         event: &SyncEventCreate,
     ) -> Result<SyncEventRef, RiverDataClientError> {
-        let resp = self
-            .http_client
-            .post(self.url("/sync/events"))
-            .bearer_auth(self.current_token())
-            .json(event)
-            .send()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("create_sync_event failed: {e}")))?;
-        self.check_response(&resp)?;
-        resp.json()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("parse sync_event: {e}")))
+        // The cycle record is the observability record: a transient refusal (a 429 during a
+        // multi-service boot was observed to lose METALP's cycle record while its data synced
+        // fully) must not silently drop it, so the send retries before giving up.
+        let mut last_err = None;
+        for attempt in 0..3u32 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(2 << attempt)).await;
+            }
+            let resp = self
+                .http_client
+                .post(self.url("/sync/events"))
+                .bearer_auth(self.current_token())
+                .json(event)
+                .send()
+                .await
+                .map_err(|e| RiverDataClientError::Api(format!("create_sync_event failed: {e}")));
+            match resp {
+                Ok(resp) => match self.check_response(&resp) {
+                    Ok(()) => {
+                        return resp.json().await.map_err(|e| {
+                            RiverDataClientError::Api(format!("parse sync_event: {e}"))
+                        });
+                    }
+                    Err(e) => last_err = Some(e),
+                },
+                Err(e) => last_err = Some(e),
+            }
+            tracing::warn!(attempt, "create_sync_event refused; retrying");
+        }
+        Err(last_err.expect("at least one attempt ran"))
     }
 
     pub async fn update_sync_event(

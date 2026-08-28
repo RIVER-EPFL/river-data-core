@@ -5,7 +5,7 @@ mod replicates;
 mod status;
 mod streams;
 
-pub use backend::{StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents};
+pub use backend::{SourceWindow, StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents};
 pub use config::RunnerConfig;
 pub use protocol::{
     CommandUpdateRequest, EnrollRequest, EnrollResponse, HeartbeatRequest, HeartbeatResponse,

@@ -31,6 +31,23 @@ pub struct StreamFetchRequest {
     pub since: Option<DateTime<Utc>>,
 }
 
+/// A completeness claim over one stream: the readings sent alongside are the COMPLETE content of
+/// the source for this stream over `[from, to)`, read from `source_rows_read` source rows. The
+/// server diffs stored content against the payload and converges (new / changed / withdrawn);
+/// without a window the request is a bare append, exactly the old semantics.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SourceWindow {
+    pub from: DateTime<Utc>,
+    pub to: DateTime<Utc>,
+    /// Source rows scanned to produce the payload. An empty payload over a window the store holds
+    /// readings for is refused server-side, so a decode failure cannot read as a source deletion.
+    pub source_rows_read: u64,
+    /// Instants the backend saw but could not carry (cell decode failures). The server retains
+    /// stored rows at these keys rather than withdrawing them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped_times: Vec<DateTime<Utc>>,
+}
+
 /// Readings fetched for one stream, ready to ingest.
 #[derive(Debug)]
 pub struct StreamReadings {
@@ -41,10 +58,12 @@ pub struct StreamReadings {
     pub audits: Vec<GroupAudit>,
     /// Marks the readings as replicate collections; the API groups them per instant.
     pub collection: bool,
+    /// The completeness claim, when this fetch read the source's full content for the stream.
+    pub window: Option<SourceWindow>,
 }
 
 impl StreamReadings {
-    /// Plain single-series readings: no audits, not a collection.
+    /// Plain single-series readings: no audits, not a collection, no completeness claim.
     pub fn new(stream_id: Uuid, source_key: String, readings: Vec<IngestReading>) -> Self {
         Self {
             stream_id,
@@ -52,6 +71,7 @@ impl StreamReadings {
             readings,
             audits: Vec::new(),
             collection: false,
+            window: None,
         }
     }
 }
