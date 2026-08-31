@@ -4,8 +4,9 @@ use uuid::Uuid;
 
 use crate::error::RiverDataClientError;
 use crate::models::{
-    CommandStatus, CurveMapping, DataStream, GroupAudit, IngestReading, IngestStatusEvent,
-    RegisterStreamRequest, StandardCurveUpsert, SyncEventCreate, SyncEventRef, SyncEventUpdate,
+    AnnotationMapping, AnnotationUpsert, CommandStatus, CurveMapping, DataStream, GroupAudit,
+    IngestReading, IngestStatusEvent, RegisterStreamRequest, StandardCurveUpsert, SyncEventCreate,
+    SyncEventRef, SyncEventUpdate,
 };
 
 pub struct RiverDataClient {
@@ -496,6 +497,44 @@ impl RiverDataClient {
             });
         }
         Ok(mappings)
+    }
+
+    // ========================================================================
+    // Annotations
+    // ========================================================================
+
+    /// Register source-authored annotations; idempotent per (source_system,
+    /// source_key), so re-asserting a key updates in place. One batched
+    /// request; the API resolves site and parameter from each stream's
+    /// pairing and reports `unpaired` for streams that have none yet.
+    pub async fn register_annotations(
+        &self,
+        source_system: &str,
+        annotations: &[AnnotationUpsert],
+    ) -> Result<Vec<AnnotationMapping>, RiverDataClientError> {
+        #[derive(serde::Deserialize)]
+        struct RegisterResponse {
+            annotations: Vec<AnnotationMapping>,
+        }
+
+        let body = serde_json::json!({
+            "source_system": source_system,
+            "annotations": annotations,
+        });
+        let resp = self
+            .http_client
+            .post(self.url("/annotations/register"))
+            .bearer_auth(self.current_token())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| RiverDataClientError::Api(format!("register_annotations failed: {e}")))?;
+        self.check_response(&resp)?;
+        let parsed: RegisterResponse = resp
+            .json()
+            .await
+            .map_err(|e| RiverDataClientError::Api(format!("parse annotations response: {e}")))?;
+        Ok(parsed.annotations)
     }
 
     // ========================================================================

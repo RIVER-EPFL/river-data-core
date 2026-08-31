@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use crate::models::annotations::AnnotationUpsert;
 use crate::models::replicates::{GroupAudit, ReplicateSpec};
 use crate::models::streams::{IngestReading, IngestStatusEvent};
 
@@ -60,6 +61,10 @@ pub struct StreamReadings {
     pub collection: bool,
     /// The completeness claim, when this fetch read the source's full content for the stream.
     pub window: Option<SourceWindow>,
+    /// Source-authored annotations riding this stream's payload (e.g. the standard curve the
+    /// source applied while producing a stored value). The driver registers them after the
+    /// stream's readings ingest; idempotent per (source_system, source_key).
+    pub annotations: Vec<AnnotationUpsert>,
 }
 
 impl StreamReadings {
@@ -72,6 +77,7 @@ impl StreamReadings {
             audits: Vec::new(),
             collection: false,
             window: None,
+            annotations: Vec::new(),
         }
     }
 }

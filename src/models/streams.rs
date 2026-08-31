@@ -141,6 +141,7 @@ mod tests {
                 portal_sd_column: Some("DOC_sd_ppb".into()),
                 curve_ref_column: Some("doc_std_curve_id".into()),
                 calc: Some("calcDOCavg".into()),
+                sd_estimator: None,
             }),
         };
         let json = serde_json::to_value(&req).unwrap();

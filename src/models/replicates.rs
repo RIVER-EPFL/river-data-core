@@ -19,6 +19,11 @@ pub struct ReplicateSpec {
     pub curve_ref_column: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calc: Option<String>,
+    /// The sd divisor the source's own sd column uses ('sample' | 'population'),
+    /// when the source declares one. Never inferred; None leaves the slot's
+    /// declaration (or the audit gate) to decide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sd_estimator: Option<String>,
 }
 
 /// One source column's pinned replicate index, as the API's register response
@@ -103,6 +108,7 @@ mod tests {
             portal_sd_column: None,
             curve_ref_column: None,
             calc: Some("calcMean".into()),
+            sd_estimator: None,
         };
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["source_columns"][1], "DIC_B");

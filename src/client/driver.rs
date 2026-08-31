@@ -299,6 +299,33 @@ impl SyncDriver {
                     batch.skipped_reasons.join("; ")
                 ));
             }
+            // Source-authored annotations after the readings they describe. A failure costs a
+            // cycle, not the note: the source re-asserts its full set every pass and the
+            // registration is idempotent per (source_system, source_key).
+            if !sr.annotations.is_empty() {
+                match self
+                    .api
+                    .register_annotations(self.backend.source_system(), &sr.annotations)
+                    .await
+                {
+                    Ok(mappings) => {
+                        let unpaired =
+                            mappings.iter().filter(|m| m.status == "unpaired").count();
+                        if unpaired > 0 && outcome.log.len() < MAX_LOG_LINES {
+                            outcome.log.push(format!(
+                                "{}: {} annotations deferred until the stream is paired",
+                                sr.source_key, unpaired
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        outcome.errors.push(format!(
+                            "{}: annotation registration failed: {e}",
+                            sr.source_key
+                        ));
+                    }
+                }
+            }
         }
     }
 
