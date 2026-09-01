@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+use uuid::Uuid;
 
 use crate::client::backend::SourceBackend;
 use crate::client::river_data_client::{IngestOptions, RiverDataClient};
@@ -32,6 +36,47 @@ pub struct SyncDriver {
     retry_max: u32,
     retry_delay_secs: u64,
     discovered: AtomicBool,
+    /// Hash of the last successfully sent RegisterStreamRequest per source_key;
+    /// an unchanged descriptor is not re-registered.
+    registered: Mutex<HashMap<String, u64>>,
+}
+
+/// FNV-1a over the canonical bytes; deterministic across processes and restarts.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// Digest of a windowed payload's source-asserted content: the window claim, the rows sorted by
+/// (time, replicate_index), the audit expectations and the riding annotations. Server curation
+/// never enters it. None for unwindowed payloads and for content that cannot serialize (which
+/// then sends as before).
+fn window_digest(sr: &StreamReadings) -> Option<String> {
+    let w = sr.window.as_ref()?;
+    let mut rows: Vec<_> = sr.readings.iter().collect();
+    rows.sort_by_key(|r| (r.time, r.replicate_index));
+    let mut audits: Vec<_> = sr.audits.iter().collect();
+    audits.sort_by_key(|a| a.time);
+    let mut annotations: Vec<_> = sr.annotations.iter().collect();
+    annotations.sort_by_key(|a| (a.time, a.source_key.clone()));
+    let canonical = serde_json::json!({
+        "window": {
+            "from": w.from,
+            "to": w.to,
+            "source_rows_read": w.source_rows_read,
+            "dropped_times": w.dropped_times,
+        },
+        "rows": rows,
+        "audits": audits,
+        "annotations": annotations,
+        "collection": sr.collection,
+    });
+    let bytes = serde_json::to_vec(&canonical).ok()?;
+    Some(format!("{:016x}", fnv1a64(&bytes)))
 }
 
 struct ReadingsOutcome {
@@ -56,6 +101,7 @@ impl SyncDriver {
             retry_max: config.retry_max,
             retry_delay_secs: config.retry_delay_secs,
             discovered: AtomicBool::new(false),
+            registered: Mutex::new(HashMap::new()),
         }
     }
 
@@ -96,7 +142,7 @@ impl SyncDriver {
             .push(format!("Standard curves: {} registered", mappings.len()));
     }
 
-    async fn discover(&self, result: &mut SyncResult) {
+    async fn discover(&self, result: &mut SyncResult, full: bool) {
         let descriptors = match self.backend.discover_streams().await {
             Ok(d) => d,
             Err(e) => {
@@ -107,6 +153,7 @@ impl SyncDriver {
         };
 
         let mut registered = 0usize;
+        let mut unchanged = 0usize;
         for d in &descriptors {
             let req = RegisterStreamRequest {
                 source_system: self.backend.source_system().to_string(),
@@ -118,9 +165,23 @@ impl SyncDriver {
                 sensor_id: d.sensor_id,
                 replicates: d.replicates.clone(),
             };
+            // A descriptor identical to the last successfully registered one converges to the
+            // same server state; re-sending it is pure write churn. A full sync re-asserts all.
+            let req_hash = serde_json::to_vec(&req).ok().map(|b| fnv1a64(&b));
+            if !full
+                && let Some(h) = req_hash
+                && self.registered.lock().is_ok_and(|m| m.get(&d.source_key) == Some(&h))
+            {
+                registered += 1;
+                unchanged += 1;
+                continue;
+            }
             match self.api.register_stream(&req).await {
                 Ok(stream) => {
                     registered += 1;
+                    if let (Some(h), Ok(mut m)) = (req_hash, self.registered.lock()) {
+                        m.insert(d.source_key.clone(), h);
+                    }
                     if let Some(assignments) = &stream.replicates
                         && let Err(e) = self
                             .backend
@@ -147,9 +208,11 @@ impl SyncDriver {
         if registered == descriptors.len() {
             self.discovered.store(true, Ordering::Relaxed);
         }
-        result
-            .log
-            .push(format!("Stream discovery: {registered} streams registered"));
+        result.log.push(format!(
+            "Stream discovery: {} streams registered, {} unchanged",
+            registered - unchanged,
+            unchanged
+        ));
     }
 
     /// Hand the backend the pinned replicate mapping each listed stream's
@@ -198,11 +261,18 @@ impl SyncDriver {
             })
             .collect();
 
-        let fetched = self
+        let mut fetched = self
             .backend
             .fetch_readings(&requests)
             .await
             .map_err(|e| format!("fetch readings: {e}"))?;
+
+        // The digests of each stream's last cleanly-applied windowed pass, as the server
+        // persisted them. Absent (older API, or no clean pass yet) means send in full.
+        let server_digests: HashMap<Uuid, String> = streams
+            .iter()
+            .filter_map(|s| s.last_window_digest.clone().map(|d| (s.id, d)))
+            .collect();
 
         let mut outcome = ReadingsOutcome {
             streams,
@@ -214,24 +284,45 @@ impl SyncDriver {
             errors: Vec::new(),
         };
 
-        self.ingest_fetched(&fetched, false, &mut outcome).await;
+        let skip = if full { &HashMap::new() } else { &server_digests };
+        self.ingest_fetched(&mut fetched, false, skip, &mut outcome)
+            .await;
 
         Ok(outcome)
     }
 
+    /// `known_digests` holds each stream's last cleanly-applied window digest; a windowed
+    /// payload whose content digest matches is skipped outright (the source is unchanged).
+    /// Pass an empty map to disable skipping (full sync, resync).
     async fn ingest_fetched(
         &self,
-        fetched: &[StreamReadings],
+        fetched: &mut [StreamReadings],
         overwrite: bool,
+        known_digests: &HashMap<Uuid, String>,
         outcome: &mut ReadingsOutcome,
     ) {
-        for sr in fetched {
+        let mut skipped_unchanged = 0usize;
+        for sr in fetched.iter_mut() {
             // An empty payload with no completeness claim is nothing to do. With a window it is
             // a claim the source holds nothing there, which the server must see: it either
             // no-ops (nothing stored) or refuses loudly (the store holds rows the claim says
             // do not exist), and silence would hide exactly that case.
             if sr.readings.is_empty() && sr.window.is_none() {
                 continue;
+            }
+            // The handshake: identical content to the last cleanly-applied pass has nothing to
+            // say. The server never persists a digest for a braked, held or rejected pass, so
+            // those windows keep re-asserting until a person rules.
+            let digest = window_digest(sr);
+            if !overwrite
+                && let Some(d) = &digest
+                && known_digests.get(&sr.stream_id) == Some(d)
+            {
+                skipped_unchanged += 1;
+                continue;
+            }
+            if let Some(w) = sr.window.as_mut() {
+                w.content_digest = digest;
             }
             let opts = IngestOptions {
                 overwrite,
@@ -327,6 +418,14 @@ impl SyncDriver {
                 }
             }
         }
+        if skipped_unchanged > 0 {
+            let line = format!("{skipped_unchanged} streams unchanged at source, not re-sent");
+            if outcome.log.len() < MAX_LOG_LINES {
+                outcome.log.push(line);
+            } else {
+                tracing::info!(skipped_unchanged, "Windowed streams unchanged at source");
+            }
+        }
     }
 
     /// RESYNC_STREAMS: fetch the named streams from the start of history and
@@ -381,7 +480,7 @@ impl SyncDriver {
             tracing::warn!(?missing, "resync_streams: source keys not registered");
         }
 
-        let fetched = self
+        let mut fetched = self
             .backend
             .fetch_readings(&requests)
             .await
@@ -396,7 +495,8 @@ impl SyncDriver {
             log: Vec::new(),
             errors: Vec::new(),
         };
-        self.ingest_fetched(&fetched, payload.overwrite, &mut outcome)
+        // A resync exists to repair server rows, so unchanged-content skipping is disabled.
+        self.ingest_fetched(&mut fetched, payload.overwrite, &HashMap::new(), &mut outcome)
             .await;
 
         Ok(serde_json::json!({
@@ -473,7 +573,7 @@ impl SyncService for SyncDriver {
 
         if full || !self.discovered.load(Ordering::Relaxed) || self.backend.rediscover_every_cycle()
         {
-            self.discover(&mut result).await;
+            self.discover(&mut result, full).await;
         }
 
         let readings = self.sync_readings(full).await;
@@ -538,5 +638,77 @@ impl SyncService for SyncDriver {
 
     fn river_data_client(&self) -> Option<&RiverDataClient> {
         Some(&self.api)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+
+    use super::*;
+    use crate::models::{IngestReading, SourceWindow};
+
+    fn t(secs: i64) -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc.timestamp_opt(secs, 0).unwrap()
+    }
+
+    fn windowed(readings: Vec<IngestReading>) -> StreamReadings {
+        let mut sr = StreamReadings::new(Uuid::nil(), "k".to_string(), readings);
+        sr.window = Some(SourceWindow {
+            from: t(0),
+            to: t(1000),
+            source_rows_read: 2,
+            dropped_times: Vec::new(),
+            content_digest: None,
+        });
+        sr
+    }
+
+    #[test]
+    fn digest_is_order_independent() {
+        let a = windowed(vec![
+            IngestReading::new(t(10), 1.5),
+            IngestReading::new(t(20), 2.5),
+        ]);
+        let b = windowed(vec![
+            IngestReading::new(t(20), 2.5),
+            IngestReading::new(t(10), 1.5),
+        ]);
+        assert_eq!(window_digest(&a), window_digest(&b));
+    }
+
+    #[test]
+    fn digest_changes_with_content() {
+        let a = windowed(vec![IngestReading::new(t(10), 1.5)]);
+        let mut b = windowed(vec![IngestReading::new(t(10), 1.5001)]);
+        assert_ne!(window_digest(&a), window_digest(&b));
+        b.readings[0].raw_value = 1.5;
+        assert_eq!(window_digest(&a), window_digest(&b));
+        b.window.as_mut().unwrap().dropped_times.push(t(30));
+        assert_ne!(window_digest(&a), window_digest(&b));
+    }
+
+    #[test]
+    fn digest_ignores_its_own_field_and_needs_a_window() {
+        let a = windowed(vec![IngestReading::new(t(10), 1.5)]);
+        let mut b = windowed(vec![IngestReading::new(t(10), 1.5)]);
+        b.window.as_mut().unwrap().content_digest = Some("beef".to_string());
+        assert_eq!(window_digest(&a), window_digest(&b));
+        let bare = StreamReadings::new(Uuid::nil(), "k".to_string(), vec![]);
+        assert_eq!(window_digest(&bare), None);
+    }
+
+    #[test]
+    fn digest_sees_annotation_changes() {
+        let a = windowed(vec![IngestReading::new(t(10), 1.5)]);
+        let mut b = windowed(vec![IngestReading::new(t(10), 1.5)]);
+        b.annotations.push(crate::models::AnnotationUpsert {
+            source_key: "k:10".to_string(),
+            stream_id: Uuid::nil(),
+            time: t(10),
+            category: "curve".to_string(),
+            text: "std curve 7".to_string(),
+        });
+        assert_ne!(window_digest(&a), window_digest(&b));
     }
 }

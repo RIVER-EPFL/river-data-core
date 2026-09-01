@@ -149,13 +149,11 @@ impl RiverDataClient {
         req: &RegisterStreamRequest,
     ) -> Result<DataStream, RiverDataClientError> {
         let resp = self
-            .http_client
-            .post(self.url("/streams/register"))
-            .bearer_auth(self.current_token())
-            .json(req)
-            .send()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("register_stream failed: {e}")))?;
+            .send_authorized(
+                self.http_client.post(self.url("/streams/register")).json(req),
+                "register_stream",
+            )
+            .await?;
         self.check_response(&resp)?;
         resp.json()
             .await
@@ -188,17 +186,15 @@ impl RiverDataClient {
             let range_str = format!("[{offset},{end}]");
 
             let resp = self
-                .http_client
-                .get(self.url("/data_streams"))
-                .query(&[
-                    ("filter", filter_str.as_str()),
-                    ("range", range_str.as_str()),
-                    ("sort", r#"["id","ASC"]"#),
-                ])
-                .bearer_auth(self.current_token())
-                .send()
-                .await
-                .map_err(|e| RiverDataClientError::Api(format!("list_streams failed: {e}")))?;
+                .send_authorized(
+                    self.http_client.get(self.url("/data_streams")).query(&[
+                        ("filter", filter_str.as_str()),
+                        ("range", range_str.as_str()),
+                        ("sort", r#"["id","ASC"]"#),
+                    ]),
+                    "list_streams",
+                )
+                .await?;
             self.check_response(&resp)?;
 
             let total = Self::parse_content_range_total(&resp);
@@ -294,13 +290,11 @@ impl RiverDataClient {
                 .map_err(|e| RiverDataClientError::Api(format!("serialize window: {e}")))?;
         }
         let resp = self
-            .http_client
-            .post(self.url("/ingest"))
-            .bearer_auth(self.current_token())
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("ingest_readings failed: {e}")))?;
+            .send_authorized(
+                self.http_client.post(self.url("/ingest")).json(&body),
+                "ingest_readings",
+            )
+            .await?;
         self.check_response(&resp)?;
         let result: IngestResponse = resp
             .json()
@@ -338,13 +332,11 @@ impl RiverDataClient {
             "events": events,
         });
         let resp = self
-            .http_client
-            .post(self.url("/ingest/status_events"))
-            .bearer_auth(self.current_token())
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("ingest_status_events failed: {e}")))?;
+            .send_authorized(
+                self.http_client.post(self.url("/ingest/status_events")).json(&body),
+                "ingest_status_events",
+            )
+            .await?;
         self.check_response(&resp)?;
         let result: IngestResponse = resp
             .json()
@@ -475,15 +467,13 @@ impl RiverDataClient {
                 .map_err(|e| RiverDataClientError::Api(format!("serialize curve: {e}")))?;
             body["source_system"] = serde_json::Value::String(source_system.to_string());
             let resp = self
-                .http_client
-                .post(self.url("/standard_curves/register"))
-                .bearer_auth(self.current_token())
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| {
-                    RiverDataClientError::Api(format!("register_standard_curve failed: {e}"))
-                })?;
+                .send_authorized(
+                    self.http_client
+                        .post(self.url("/standard_curves/register"))
+                        .json(&body),
+                    "register_standard_curve",
+                )
+                .await?;
             self.check_response(&resp)?;
             let parsed: CurveResponse = resp
                 .json()
@@ -522,13 +512,11 @@ impl RiverDataClient {
             "annotations": annotations,
         });
         let resp = self
-            .http_client
-            .post(self.url("/annotations/register"))
-            .bearer_auth(self.current_token())
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("register_annotations failed: {e}")))?;
+            .send_authorized(
+                self.http_client.post(self.url("/annotations/register")).json(&body),
+                "register_annotations",
+            )
+            .await?;
         self.check_response(&resp)?;
         let parsed: RegisterResponse = resp
             .json()
@@ -544,13 +532,13 @@ impl RiverDataClient {
     pub async fn refresh_aggregates(&self, full: bool) -> Result<(), RiverDataClientError> {
         let body = serde_json::json!({ "full": full });
         let resp = self
-            .http_client
-            .post(self.url("/actions/refresh_aggregates"))
-            .bearer_auth(self.current_token())
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("refresh_aggregates failed: {e}")))?;
+            .send_authorized(
+                self.http_client
+                    .post(self.url("/actions/refresh_aggregates"))
+                    .json(&body),
+                "refresh_aggregates",
+            )
+            .await?;
         self.check_response(&resp)?;
         Ok(())
     }
@@ -567,13 +555,13 @@ impl RiverDataClient {
     ) -> Result<(), RiverDataClientError> {
         let body = serde_json::json!({ "status": status.as_str(), "result": result });
         let resp = self
-            .http_client
-            .patch(self.url(&format!("/sync/commands/{command_id}")))
-            .bearer_auth(self.current_token())
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("update_command failed: {e}")))?;
+            .send_authorized(
+                self.http_client
+                    .patch(self.url(&format!("/sync/commands/{command_id}")))
+                    .json(&body),
+                "update_command",
+            )
+            .await?;
         self.check_response(&resp)?;
         Ok(())
     }
@@ -595,13 +583,11 @@ impl RiverDataClient {
                 tokio::time::sleep(std::time::Duration::from_secs(2 << attempt)).await;
             }
             let resp = self
-                .http_client
-                .post(self.url("/sync/events"))
-                .bearer_auth(self.current_token())
-                .json(event)
-                .send()
-                .await
-                .map_err(|e| RiverDataClientError::Api(format!("create_sync_event failed: {e}")));
+                .send_authorized(
+                    self.http_client.post(self.url("/sync/events")).json(event),
+                    "create_sync_event",
+                )
+                .await;
             match resp {
                 Ok(resp) => match self.check_response(&resp) {
                     Ok(()) => {
@@ -624,13 +610,13 @@ impl RiverDataClient {
         update: &SyncEventUpdate,
     ) -> Result<(), RiverDataClientError> {
         let resp = self
-            .http_client
-            .patch(self.url(&format!("/sync/events/{event_id}")))
-            .bearer_auth(self.current_token())
-            .json(update)
-            .send()
-            .await
-            .map_err(|e| RiverDataClientError::Api(format!("update_sync_event failed: {e}")))?;
+            .send_authorized(
+                self.http_client
+                    .patch(self.url(&format!("/sync/events/{event_id}")))
+                    .json(update),
+                "update_sync_event",
+            )
+            .await?;
         self.check_response(&resp)?;
         Ok(())
     }
@@ -638,6 +624,32 @@ impl RiverDataClient {
     // ========================================================================
     // Helpers
     // ========================================================================
+
+    /// Send with the current session token; on 401, re-send once with the token
+    /// as it stands now. The heartbeat rotates the session token, so a request
+    /// in flight across a rotation carries a token that was just retired.
+    async fn send_authorized(
+        &self,
+        req: reqwest::RequestBuilder,
+        what: &str,
+    ) -> Result<reqwest::Response, RiverDataClientError> {
+        let retry = req.try_clone();
+        let resp = req
+            .bearer_auth(self.current_token())
+            .send()
+            .await
+            .map_err(|e| RiverDataClientError::Api(format!("{what} failed: {e}")))?;
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED
+            && let Some(retry) = retry
+        {
+            return retry
+                .bearer_auth(self.current_token())
+                .send()
+                .await
+                .map_err(|e| RiverDataClientError::Api(format!("{what} failed: {e}")));
+        }
+        Ok(resp)
+    }
 
     fn check_response(&self, resp: &reqwest::Response) -> Result<(), RiverDataClientError> {
         if !resp.status().is_success() {

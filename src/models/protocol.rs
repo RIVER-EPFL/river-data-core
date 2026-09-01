@@ -20,6 +20,10 @@ pub struct EnrollResponse {
     /// initial sync so a restart cannot undo a pause.
     #[serde(default)]
     pub paused: bool,
+    /// Operator-set scheduled sync cadence, persisted server-side. None leaves the
+    /// service on its own `SYNC_INTERVAL_SECONDS`.
+    #[serde(default)]
+    pub sync_interval_secs: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,6 +42,10 @@ pub struct HeartbeatResponse {
     /// Operator-desired pause state, persisted server-side.
     #[serde(default)]
     pub paused: bool,
+    /// Operator-set scheduled sync cadence, persisted server-side. A change here is
+    /// adopted by the running service on the next heartbeat.
+    #[serde(default)]
+    pub sync_interval_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

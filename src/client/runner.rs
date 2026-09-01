@@ -42,6 +42,25 @@ async fn shutdown_signal() {
     }
 }
 
+/// Shortest cadence an operator may set. A server-set value below it is a misconfiguration that
+/// would hammer the source, so the floor applies rather than the number.
+const MIN_SYNC_INTERVAL_SECS: u64 = 30;
+
+/// The cadence to run at: the operator's, floored, or the service's own configuration when the
+/// server sets none.
+fn clamp_interval(server: Option<u64>, configured: u64) -> u64 {
+    match server {
+        Some(secs) => secs.max(MIN_SYNC_INTERVAL_SECS),
+        None => configured,
+    }
+}
+
+/// The two pieces of server-owned state the heartbeat reconciles into the running service.
+struct ServerState {
+    paused: watch::Sender<bool>,
+    interval: watch::Sender<u64>,
+}
+
 pub struct SyncServiceRunner<S: SyncService> {
     service: Arc<S>,
     config: RunnerConfig,
@@ -106,6 +125,12 @@ impl<S: SyncService> SyncServiceRunner<S> {
             tracing::info!("Service is paused server-side; scheduled syncs disabled until resumed");
         }
         let (pause_tx, pause_rx) = watch::channel(enroll_resp.paused);
+        // The operator's cadence, when set, wins over the service's own configuration; the
+        // heartbeat reconciles later changes without a restart.
+        let (interval_tx, interval_rx) = watch::channel(clamp_interval(
+            enroll_resp.sync_interval_secs,
+            self.config.sync_interval_secs,
+        ));
         let (sync_tx, sync_rx) = mpsc::channel::<SyncTrigger>(16);
         let (current_op_tx, current_op_rx) = watch::channel::<Option<String>>(None);
         let active_event: ActiveEvent = Arc::new(RwLock::new(None));
@@ -116,7 +141,10 @@ impl<S: SyncService> SyncServiceRunner<S> {
         let hb_service = self.service.clone();
         let hb_config = self.config.clone();
         let hb_sync_tx = sync_tx.clone();
-        let hb_pause_tx = pause_tx.clone();
+        let hb_server_state = ServerState {
+            paused: pause_tx.clone(),
+            interval: interval_tx.clone(),
+        };
         let hb_service_id = service_id.clone();
 
         let heartbeat_handle = tokio::spawn(async move {
@@ -126,20 +154,19 @@ impl<S: SyncService> SyncServiceRunner<S> {
                 hb_config,
                 hb_service,
                 hb_sync_tx,
-                hb_pause_tx,
+                hb_server_state,
                 current_op_rx,
             )
             .await;
         });
 
         let sync_service = self.service.clone();
-        let sync_interval = self.config.sync_interval_secs;
         let sync_active_event = active_event.clone();
         let sync_handle = tokio::spawn(async move {
             Self::sync_loop(
                 sync_service,
                 service_id,
-                sync_interval,
+                interval_rx,
                 pause_rx,
                 sync_rx,
                 current_op_tx,
@@ -180,9 +207,13 @@ impl<S: SyncService> SyncServiceRunner<S> {
         config: RunnerConfig,
         service: Arc<S>,
         sync_tx: mpsc::Sender<SyncTrigger>,
-        pause_tx: watch::Sender<bool>,
+        server_state: ServerState,
         current_op_rx: watch::Receiver<Option<String>>,
     ) {
+        let ServerState {
+            paused: pause_tx,
+            interval: interval_tx,
+        } = server_state;
         let mut interval =
             tokio::time::interval(Duration::from_secs(config.heartbeat_interval_secs));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -211,6 +242,16 @@ impl<S: SyncService> SyncServiceRunner<S> {
                         let _ = pause_tx.send(resp.paused);
                     }
 
+                    let wanted =
+                        clamp_interval(resp.sync_interval_secs, config.sync_interval_secs);
+                    if *interval_tx.borrow() != wanted {
+                        tracing::info!(
+                            sync_interval_secs = wanted,
+                            "Sync cadence reconciled from server"
+                        );
+                        let _ = interval_tx.send(wanted);
+                    }
+
                     for cmd in resp.pending_commands {
                         Self::handle_command(&service, cmd, &sync_tx, &pause_tx).await;
                     }
@@ -230,6 +271,10 @@ impl<S: SyncService> SyncServiceRunner<S> {
                                 resp.service_id;
                             service.update_token(&resp.session_token);
                             let _ = pause_tx.send(resp.paused);
+                            let _ = interval_tx.send(clamp_interval(
+                                resp.sync_interval_secs,
+                                config.sync_interval_secs,
+                            ));
                             tracing::info!(service_id = %resp.service_id, "Re-enrolled successfully");
                         }
                         Err(e) => {
@@ -325,13 +370,13 @@ impl<S: SyncService> SyncServiceRunner<S> {
     async fn sync_loop(
         service: Arc<S>,
         service_id: SharedServiceId,
-        sync_interval_secs: u64,
+        mut interval_rx: watch::Receiver<u64>,
         pause_rx: watch::Receiver<bool>,
         mut sync_rx: mpsc::Receiver<SyncTrigger>,
         current_op_tx: watch::Sender<Option<String>>,
         active_event: ActiveEvent,
     ) {
-        let mut interval = tokio::time::interval(Duration::from_secs(sync_interval_secs));
+        let mut interval = tokio::time::interval(Duration::from_secs(*interval_rx.borrow()));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         interval.tick().await;
 
@@ -339,6 +384,16 @@ impl<S: SyncService> SyncServiceRunner<S> {
             let trigger = tokio::select! {
                 _ = interval.tick() => SyncTrigger::Scheduled,
                 Some(t) = sync_rx.recv() => t,
+                // A cadence change restarts the clock rather than waiting out the old period,
+                // so shortening it takes effect now and lengthening it cannot fire early.
+                Ok(()) = interval_rx.changed() => {
+                    let secs = *interval_rx.borrow();
+                    tracing::info!(sync_interval_secs = secs, "Sync cadence changed");
+                    interval = tokio::time::interval(Duration::from_secs(secs));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    interval.tick().await;
+                    continue;
+                }
             };
 
             let (full, command_id) = match &trigger {
@@ -447,6 +502,11 @@ impl<S: SyncService> SyncServiceRunner<S> {
             }
 
             Self::log_outcome(&result);
+
+            // A cycle that overruns the interval leaves a tick already due, which
+            // would start the next cycle immediately. Reset so scheduled cycles
+            // always begin a full interval after the previous one completed.
+            interval.reset();
         }
     }
 
@@ -466,5 +526,17 @@ impl<S: SyncService> SyncServiceRunner<S> {
                 tracing::error!(error = %e, "Sync failed");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MIN_SYNC_INTERVAL_SECS, clamp_interval};
+
+    #[test]
+    fn the_server_cadence_wins_but_never_below_the_floor() {
+        assert_eq!(clamp_interval(None, 300), 300);
+        assert_eq!(clamp_interval(Some(3600), 300), 3600);
+        assert_eq!(clamp_interval(Some(1), 300), MIN_SYNC_INTERVAL_SECS);
     }
 }

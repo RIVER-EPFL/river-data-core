@@ -332,7 +332,7 @@ async fn test_ingest_stops_at_first_failed_batch() {
 }
 
 #[tokio::test]
-async fn test_rediscovery_every_cycle_when_backend_asks() {
+async fn test_rediscovery_skips_unchanged_descriptors() {
     let h = harness(
         FakeBackend {
             readings_per_stream: 1,
@@ -345,6 +345,23 @@ async fn test_rediscovery_every_cycle_when_backend_asks() {
 
     h.driver.sync(false).await.unwrap();
     h.driver.sync(false).await.unwrap();
+    assert_eq!(count(&h.server, "POST", "/api/streams/register").await, 1);
+}
+
+#[tokio::test]
+async fn test_full_sync_reregisters_unchanged_descriptors() {
+    let h = harness(
+        FakeBackend {
+            readings_per_stream: 1,
+            rediscover: true,
+            ..Default::default()
+        },
+        vec![stream_json(Uuid::new_v4(), "s1", None)],
+    )
+    .await;
+
+    h.driver.sync(false).await.unwrap();
+    h.driver.sync(true).await.unwrap();
     assert_eq!(count(&h.server, "POST", "/api/streams/register").await, 2);
 }
 

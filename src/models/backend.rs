@@ -47,6 +47,11 @@ pub struct SourceWindow {
     /// stored rows at these keys rather than withdrawing them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dropped_times: Vec<DateTime<Utc>>,
+    /// Digest of the canonical payload, stamped by the driver before send. The server persists
+    /// it on a cleanly-applied pass and echoes it on the stream list, so the next cycle can skip
+    /// re-sending unchanged content. Opaque to the server; never computed server-side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_digest: Option<String>,
 }
 
 /// Readings fetched for one stream, ready to ingest.

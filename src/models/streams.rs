@@ -18,6 +18,10 @@ pub struct DataStream {
     pub measurement_type: Option<String>,
     pub is_active: bool,
     pub last_data_time: Option<chrono::DateTime<chrono::Utc>>,
+    /// Content digest of the last cleanly-applied windowed pass, as claimed by the sync client.
+    /// Absent on APIs that predate the handshake; the client then sends full windows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_window_digest: Option<String>,
     /// The authoritative replicate column-to-index mapping, present on a
     /// register response for a stream declaring a replicate family. Absent on
     /// list responses and on APIs that predate pinning; the same list persists
