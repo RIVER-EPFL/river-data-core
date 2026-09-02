@@ -352,8 +352,14 @@ impl SyncDriver {
                 }
             }
             if batch.failed_batches > 0 {
+                // The server's own explanation, not just that something failed: this line is the
+                // whole of what an operator sees for the cycle.
+                let reason = batch
+                    .errors
+                    .first()
+                    .map_or_else(String::new, |e| format!(" ({e})"));
                 outcome.errors.push(format!(
-                    "{}: ingest failed, {} readings deferred to next cycle",
+                    "{}: ingest failed{reason}, {} readings deferred to next cycle",
                     sr.source_key, batch.deferred
                 ));
             }

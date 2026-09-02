@@ -38,6 +38,14 @@ pub struct IngestOutcome {
     pub unchanged: u64,
 }
 
+/// Clip a server message to `max` characters on a character boundary, marking that it was clipped.
+fn truncate(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        Some((idx, _)) => format!("{}…", &text[..idx]),
+        None => text.to_string(),
+    }
+}
+
 /// Outcome of a chunked ingest.
 #[derive(Debug, Default)]
 pub struct BatchedIngest {
@@ -51,6 +59,9 @@ pub struct BatchedIngest {
     pub failed_batches: usize,
     /// Readings not attempted because an earlier batch failed.
     pub deferred: usize,
+    /// Why each failed batch failed, as the server explained it. The ledger row is the operator's
+    /// only view of a cycle, so a refusal that is not carried here is a refusal nobody can read.
+    pub errors: Vec<String>,
 }
 
 /// Per-request ingest flags and audit payload.
@@ -154,7 +165,7 @@ impl RiverDataClient {
                 "register_stream",
             )
             .await?;
-        self.check_response(&resp)?;
+        let resp = self.check_response(resp).await?;
         resp.json()
             .await
             .map_err(|e| RiverDataClientError::Api(format!("parse stream: {e}")))
@@ -195,7 +206,7 @@ impl RiverDataClient {
                     "list_streams",
                 )
                 .await?;
-            self.check_response(&resp)?;
+            let resp = self.check_response(resp).await?;
 
             let total = Self::parse_content_range_total(&resp);
 
@@ -295,7 +306,7 @@ impl RiverDataClient {
                 "ingest_readings",
             )
             .await?;
-        self.check_response(&resp)?;
+        let resp = self.check_response(resp).await?;
         let result: IngestResponse = resp
             .json()
             .await
@@ -337,7 +348,7 @@ impl RiverDataClient {
                 "ingest_status_events",
             )
             .await?;
-        self.check_response(&resp)?;
+        let resp = self.check_response(resp).await?;
         let result: IngestResponse = resp
             .json()
             .await
@@ -396,6 +407,7 @@ impl RiverDataClient {
                     tracing::warn!(%stream_id, batch_len = ordered.len(), error = %e, "Windowed ingest failed; the window will be re-asserted next cycle");
                     result.failed_batches += 1;
                     result.deferred = readings.len();
+                    result.errors.push(e.to_string());
                 }
             }
             return result;
@@ -435,6 +447,7 @@ impl RiverDataClient {
                     tracing::warn!(%stream_id, batch_len = chunk.len(), error = %e, "Ingest batch failed, deferring rest of stream to next cycle");
                     result.failed_batches += 1;
                     result.deferred = readings.len() - sent;
+                    result.errors.push(e.to_string());
                     break;
                 }
             }
@@ -474,7 +487,7 @@ impl RiverDataClient {
                     "register_standard_curve",
                 )
                 .await?;
-            self.check_response(&resp)?;
+            let resp = self.check_response(resp).await?;
             let parsed: CurveResponse = resp
                 .json()
                 .await
@@ -517,7 +530,7 @@ impl RiverDataClient {
                 "register_annotations",
             )
             .await?;
-        self.check_response(&resp)?;
+        let resp = self.check_response(resp).await?;
         let parsed: RegisterResponse = resp
             .json()
             .await
@@ -539,7 +552,7 @@ impl RiverDataClient {
                 "refresh_aggregates",
             )
             .await?;
-        self.check_response(&resp)?;
+        self.check_response(resp).await?;
         Ok(())
     }
 
@@ -562,7 +575,7 @@ impl RiverDataClient {
                 "update_command",
             )
             .await?;
-        self.check_response(&resp)?;
+        self.check_response(resp).await?;
         Ok(())
     }
 
@@ -589,8 +602,8 @@ impl RiverDataClient {
                 )
                 .await;
             match resp {
-                Ok(resp) => match self.check_response(&resp) {
-                    Ok(()) => {
+                Ok(resp) => match self.check_response(resp).await {
+                    Ok(resp) => {
                         return resp.json().await.map_err(|e| {
                             RiverDataClientError::Api(format!("parse sync_event: {e}"))
                         });
@@ -617,7 +630,7 @@ impl RiverDataClient {
                 "update_sync_event",
             )
             .await?;
-        self.check_response(&resp)?;
+        self.check_response(resp).await?;
         Ok(())
     }
 
@@ -651,21 +664,80 @@ impl RiverDataClient {
         Ok(resp)
     }
 
-    fn check_response(&self, resp: &reqwest::Response) -> Result<(), RiverDataClientError> {
-        if !resp.status().is_success() {
-            return Err(RiverDataClientError::Api(format!(
-                "HTTP {} from {}",
-                resp.status(),
-                resp.url()
-            )));
+    /// Fail on a non-2xx, carrying the server's own explanation. The reason a request was refused
+    /// lives only in the body (a dishonest completeness window, a window on a non-spot stream, a
+    /// project-scope rejection), and the error text is what reaches `sync_events.errors`, so a bare
+    /// status line sends an operator to the pod logs to learn anything at all.
+    async fn check_response(
+        &self,
+        resp: reqwest::Response,
+    ) -> Result<reqwest::Response, RiverDataClientError> {
+        if resp.status().is_success() {
+            return Ok(resp);
         }
-        Ok(())
+        let status = resp.status();
+        let url = resp.url().clone();
+        let body = resp.text().await.unwrap_or_default();
+        let body = body.trim();
+        Err(RiverDataClientError::Api(if body.is_empty() {
+            format!("HTTP {status} from {url}")
+        } else {
+            // An error page rather than an API message would otherwise fill the ledger row.
+            format!("HTTP {status} from {url}: {}", truncate(body, 500))
+        }))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scenario: the API refuses an ingest and says why in the body (a dishonest completeness
+    /// window, a window on a non-spot stream, a project-scope rejection).
+    ///
+    /// Expected behaviour: the reason reaches the error, because the error text is what a sync
+    /// service writes into `sync_events.errors` and that ledger row is the operator's only view of
+    /// the cycle. A status line alone makes a stream refused for weeks look like a transient 500.
+    #[tokio::test]
+    async fn a_refusal_carries_the_servers_explanation() {
+        let client = RiverDataClient::new("http://localhost:3000", "tok").unwrap();
+        let resp: reqwest::Response = http::Response::builder()
+            .status(400)
+            .body("a completeness window is only accepted on a stream declared spot")
+            .unwrap()
+            .into();
+        let err = client
+            .check_response(resp)
+            .await
+            .expect_err("a 400 is an error");
+        let text = err.to_string();
+        assert!(text.contains("400"), "{text}");
+        assert!(
+            text.contains("only accepted on a stream declared spot"),
+            "the server's own words must survive: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_success_passes_the_response_through() {
+        let client = RiverDataClient::new("http://localhost:3000", "tok").unwrap();
+        let resp: reqwest::Response = http::Response::builder()
+            .status(200)
+            .body("{}")
+            .unwrap()
+            .into();
+        assert!(client.check_response(resp).await.is_ok());
+    }
+
+    #[test]
+    fn a_long_body_is_clipped_rather_than_filling_the_ledger_row() {
+        let clipped = truncate(&"x".repeat(900), 500);
+        assert_eq!(clipped.chars().count(), 501, "500 characters plus the mark");
+        assert!(clipped.ends_with('…'));
+        // Short text is returned whole, and clipping never splits a character.
+        assert_eq!(truncate("short", 500), "short");
+        assert_eq!(truncate("é".repeat(10).as_str(), 3), "ééé…");
+    }
 
     #[test]
     fn test_url_construction() {
