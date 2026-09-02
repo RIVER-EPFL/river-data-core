@@ -51,10 +51,15 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     h
 }
 
-/// Digest of a windowed payload's source-asserted content: the window claim, the rows sorted by
+/// Digest of a windowed payload's source-asserted content: the span it covers, the rows sorted by
 /// (time, replicate_index), the audit expectations and the riding annotations. Server curation
 /// never enters it. None for unwindowed payloads and for content that cannot serialize (which
 /// then sends as before).
+///
+/// The window's `to` and `source_rows_read` are deliberately out. They describe the scan, not the
+/// content: `to` is stamped at the moment of the fetch and `source_rows_read` counts the whole
+/// station's page, so either would move on a cycle that read nothing new and no unchanged pass
+/// could ever be skipped. The server judges both for honesty when a payload does arrive.
 fn window_digest(sr: &StreamReadings) -> Option<String> {
     let w = sr.window.as_ref()?;
     let mut rows: Vec<_> = sr.readings.iter().collect();
@@ -66,8 +71,6 @@ fn window_digest(sr: &StreamReadings) -> Option<String> {
     let canonical = serde_json::json!({
         "window": {
             "from": w.from,
-            "to": w.to,
-            "source_rows_read": w.source_rows_read,
             "dropped_times": w.dropped_times,
         },
         "rows": rows,
@@ -696,6 +699,28 @@ mod tests {
         assert_eq!(window_digest(&a), window_digest(&b));
         let bare = StreamReadings::new(Uuid::nil(), "k".to_string(), vec![]);
         assert_eq!(window_digest(&bare), None);
+    }
+
+    /// Scenario: a reconciled backend re-reads its source and finds it unchanged, but stamps the
+    /// window's `to` at the moment of the scan and reports the whole station's row count.
+    ///
+    /// Expected behaviour: the digest is over the content the source asserts, so a moving `to` and
+    /// a row count that follows a sibling column leave it equal and the pass is skipped. The server
+    /// judges both fields for honesty; neither says anything about this stream's rows.
+    #[test]
+    fn digest_ignores_the_scan_clock_and_the_station_row_count() {
+        let a = windowed(vec![IngestReading::new(t(10), 1.5)]);
+        let mut b = windowed(vec![IngestReading::new(t(10), 1.5)]);
+        {
+            let w = b.window.as_mut().unwrap();
+            w.to = t(9999);
+            w.source_rows_read = 501;
+        }
+        assert_eq!(window_digest(&a), window_digest(&b));
+
+        // `from` is the span the claim covers, so it stays in.
+        b.window.as_mut().unwrap().from = t(5);
+        assert_ne!(window_digest(&a), window_digest(&b));
     }
 
     #[test]
