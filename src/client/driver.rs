@@ -173,7 +173,10 @@ impl SyncDriver {
             let req_hash = serde_json::to_vec(&req).ok().map(|b| fnv1a64(&b));
             if !full
                 && let Some(h) = req_hash
-                && self.registered.lock().is_ok_and(|m| m.get(&d.source_key) == Some(&h))
+                && self
+                    .registered
+                    .lock()
+                    .is_ok_and(|m| m.get(&d.source_key) == Some(&h))
             {
                 registered += 1;
                 unchanged += 1;
@@ -287,7 +290,11 @@ impl SyncDriver {
             errors: Vec::new(),
         };
 
-        let skip = if full { &HashMap::new() } else { &server_digests };
+        let skip = if full {
+            &HashMap::new()
+        } else {
+            &server_digests
+        };
         self.ingest_fetched(&mut fetched, false, skip, &mut outcome)
             .await;
 
@@ -409,8 +416,7 @@ impl SyncDriver {
                     .await
                 {
                     Ok(mappings) => {
-                        let unpaired =
-                            mappings.iter().filter(|m| m.status == "unpaired").count();
+                        let unpaired = mappings.iter().filter(|m| m.status == "unpaired").count();
                         if unpaired > 0 && outcome.log.len() < MAX_LOG_LINES {
                             outcome.log.push(format!(
                                 "{}: {} annotations deferred until the stream is paired",
@@ -505,8 +511,13 @@ impl SyncDriver {
             errors: Vec::new(),
         };
         // A resync exists to repair server rows, so unchanged-content skipping is disabled.
-        self.ingest_fetched(&mut fetched, payload.overwrite, &HashMap::new(), &mut outcome)
-            .await;
+        self.ingest_fetched(
+            &mut fetched,
+            payload.overwrite,
+            &HashMap::new(),
+            &mut outcome,
+        )
+        .await;
 
         Ok(serde_json::json!({
             "streams_requested": payload.source_keys.len(),
@@ -739,7 +750,16 @@ mod tests {
             time: t(10),
             category: "curve".to_string(),
             text: "std curve 7".to_string(),
+            standard_curve_id: None,
         });
         assert_ne!(window_digest(&a), window_digest(&b));
+
+        let before = window_digest(&b);
+        b.annotations[0].standard_curve_id = Some(Uuid::from_u128(7));
+        assert_ne!(
+            before,
+            window_digest(&b),
+            "the curve reference is source-asserted content"
+        );
     }
 }

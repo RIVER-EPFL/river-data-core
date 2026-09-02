@@ -19,6 +19,10 @@ pub struct AnnotationUpsert {
     pub time: DateTime<Utc>,
     pub category: String,
     pub text: String,
+    /// The standard curve the source applied to produce the annotated value. The API freezes an
+    /// annotation's curve and text once stored with one, reporting later edits as `frozen`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standard_curve_id: Option<Uuid>,
 }
 
 /// The API-side outcome for one registered annotation.
@@ -27,6 +31,6 @@ pub struct AnnotationMapping {
     pub source_key: String,
     /// None when the annotation could not be stored (`unpaired`).
     pub id: Option<Uuid>,
-    /// created | updated | unchanged | unpaired
+    /// created | updated | unchanged | frozen | unpaired
     pub status: String,
 }
