@@ -13,7 +13,7 @@ use river_data_core::client::{
     BackendError, RiverDataClient, SourceBackend, StreamDescriptor, StreamFetchRequest,
     StreamReadings, SyncDriver, SyncService,
 };
-use river_data_core::models::{ColumnAssignment, IngestReading, RunnerConfig};
+use river_data_core::models::{ColumnAssignment, IngestReading, RunnerConfig, SourceWindow};
 
 fn test_config() -> RunnerConfig {
     RunnerConfig {
@@ -50,6 +50,8 @@ struct FakeBackend {
     readings_per_stream: usize,
     fail_fetch: bool,
     rediscover: bool,
+    reconciled: bool,
+    windowed: bool,
     fetch_calls: Arc<AtomicU32>,
     fetch_requests: Arc<Mutex<Vec<Vec<StreamFetchRequest>>>>,
     applied_assignments: AppliedAssignments,
@@ -63,6 +65,10 @@ impl SourceBackend for FakeBackend {
 
     fn rediscover_every_cycle(&self) -> bool {
         self.rediscover
+    }
+
+    fn reconciled(&self) -> bool {
+        self.reconciled
     }
 
     async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError> {
@@ -102,15 +108,26 @@ impl SourceBackend for FakeBackend {
         Ok(requests
             .iter()
             .map(|r| {
-                StreamReadings::new(
+                let n = self.readings_per_stream;
+                let mut sr = StreamReadings::new(
                     r.stream_id,
                     r.source_key.clone(),
-                    (0..self.readings_per_stream)
+                    (0..n)
                         .map(|i| {
                             IngestReading::new(base + chrono::Duration::seconds(i as i64), i as f64)
                         })
                         .collect(),
-                )
+                );
+                if self.windowed {
+                    sr.window = Some(SourceWindow {
+                        from: base,
+                        to: base + chrono::Duration::seconds(n as i64),
+                        source_rows_read: n as u64,
+                        dropped_times: Vec::new(),
+                        content_digest: None,
+                    });
+                }
+                sr
             })
             .collect())
     }
@@ -485,4 +502,107 @@ async fn test_replicate_assignments_reach_the_backend() {
     assert_eq!(from_metadata.1.len(), 1);
     assert_eq!(from_metadata.1[0].index, 2);
     assert!(!from_metadata.1[0].retired);
+}
+
+// A reconciled backend re-reads its source's full content every cycle. Even on an
+// incremental sync of a stream carrying a cursor, the fetch must ask for the whole
+// window (since: None); applying the cursor would truncate the payload and degrade
+// the source silently to append mode.
+#[tokio::test]
+async fn test_reconciled_backend_ignores_cursor() {
+    let fetch_requests = Arc::new(Mutex::new(Vec::new()));
+    let backend = FakeBackend {
+        readings_per_stream: 1,
+        reconciled: true,
+        fetch_requests: fetch_requests.clone(),
+        ..Default::default()
+    };
+    let id = Uuid::new_v4();
+    let h = harness(
+        backend,
+        vec![stream_json(id, "s1", Some("2026-01-15T12:00:00Z"))],
+    )
+    .await;
+
+    h.driver.sync(false).await.unwrap();
+
+    let calls = fetch_requests.lock().unwrap();
+    let req = &calls[0][0];
+    assert_eq!(req.stream_id, id);
+    assert_eq!(req.since, None);
+}
+
+// A payload carrying a completeness claim must go out as exactly one request even
+// when it exceeds the batch size: each chunk would otherwise claim the whole window
+// while carrying a fraction of it, and the server would withdraw the rest.
+#[tokio::test]
+async fn test_windowed_payload_sent_as_single_request() {
+    let h = harness(
+        FakeBackend {
+            readings_per_stream: 1500,
+            windowed: true,
+            reconciled: true,
+            ..Default::default()
+        },
+        vec![stream_json(Uuid::new_v4(), "s1", None)],
+    )
+    .await;
+
+    // The default harness /ingest does not echo accepted_window; a windowed request
+    // needs the echo or the client rejects it. Remount one that echoes the claim.
+    h.server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/api/data_streams"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-range", "data_streams 0-1/1")
+                .set_body_json(vec![stream_json(Uuid::new_v4(), "s1", None)]),
+        )
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/ingest"))
+        .respond_with(|req: &Request| {
+            let body: serde_json::Value = req.body_json().unwrap();
+            let n = body["readings"].as_array().map(|a| a.len()).unwrap_or(0);
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"inserted": n, "accepted_window": body["window"]}))
+        })
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/actions/refresh_aggregates"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&h.server)
+        .await;
+
+    let result = h.driver.sync(false).await.unwrap();
+    assert_eq!(result.readings_synced, 1500);
+    assert_eq!(count(&h.server, "POST", "/api/ingest").await, 1);
+}
+
+// A windowed request whose response omits accepted_window is an older API silently
+// ignoring the claim. The client must reject it rather than downgrade the source to
+// append mode with no record.
+#[tokio::test]
+async fn test_windowed_payload_errors_without_accepted_window_echo() {
+    let h = harness(
+        FakeBackend {
+            readings_per_stream: 10,
+            windowed: true,
+            reconciled: true,
+            ..Default::default()
+        },
+        vec![stream_json(Uuid::new_v4(), "s1", None)],
+    )
+    .await;
+
+    let result = h.driver.sync(false).await.unwrap();
+    assert_eq!(result.readings_synced, 0);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.contains("did not echo the completeness window"))
+    );
 }

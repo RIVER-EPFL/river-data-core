@@ -313,7 +313,7 @@ impl RiverDataClient {
             .map_err(|e| RiverDataClientError::Api(format!("parse ingest response: {e}")))?;
         if opts.window.is_some() && result.accepted_window.is_none() {
             return Err(RiverDataClientError::Api(
-                "the API did not echo the completeness window; it is running an image without                  windowed reconciliation and the claim was silently ignored"
+                "the API did not echo the completeness window; it is running an image without windowed reconciliation and the claim was silently ignored"
                     .to_string(),
             ));
         }
