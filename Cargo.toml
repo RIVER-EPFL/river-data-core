@@ -30,7 +30,9 @@ openapi = ["dep:utoipa"]
 [dependencies]
 # Always
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# `float_roundtrip`: without it the JSON parser can land a value one ULP from the literal it read,
+# so a source's reported measurement is not the number stored for it.
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.11", features = ["v4", "serde"] }
 tracing = "0.1"
