@@ -146,6 +146,7 @@ async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError> 
         measurement_type: Some("continuous".to_string()),
         sensor_id: None,
         replicates: None,
+        decimal_places: None,
     }])
 }
 ```
