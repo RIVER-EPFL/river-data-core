@@ -187,6 +187,44 @@ impl SyncDriver {
             .push(format!("Standard curves: {} registered", mappings.len()));
     }
 
+    /// Register the backend's site notes. Runs after discovery: a note's station
+    /// resolves against sites that exist, and pairing is what creates them.
+    async fn sync_notes(&self, result: &mut SyncResult) {
+        let notes = match self.backend.discover_notes().await {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(error = %e, "Note discovery failed");
+                result.errors.push(format!("Note discovery: {e}"));
+                return;
+            }
+        };
+        if notes.is_empty() {
+            return;
+        }
+        let mappings = match self
+            .api
+            .register_notes(self.backend.source_system(), &notes)
+            .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(error = %e, "Note registration failed");
+                result.errors.push(format!("Note registration: {e}"));
+                return;
+            }
+        };
+        if let Err(e) = self.backend.apply_note_mappings(&mappings).await {
+            tracing::warn!(error = %e, "Applying note mappings failed");
+            result.errors.push(format!("Note mappings: {e}"));
+            return;
+        }
+        let unresolved = mappings.iter().filter(|m| m.id.is_none()).count();
+        result.log.push(format!(
+            "Notes: {} registered, {unresolved} awaiting their site",
+            mappings.len()
+        ));
+    }
+
     async fn discover(&self, result: &mut SyncResult, full: bool) {
         let descriptors = match self.backend.discover_streams().await {
             Ok(d) => d,
@@ -639,6 +677,10 @@ impl SyncService for SyncDriver {
         {
             self.discover(&mut result, full).await;
         }
+
+        // Notes after discovery: a note names a station, and pairing is what
+        // turns a station into a site the note can hang from.
+        self.sync_notes(&mut result).await;
 
         let readings = self.sync_readings(full).await;
 

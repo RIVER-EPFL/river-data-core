@@ -6,7 +6,7 @@ mod replicates;
 mod status;
 mod streams;
 
-pub use annotations::{AnnotationMapping, AnnotationUpsert};
+pub use annotations::{AnnotationMapping, AnnotationUpsert, NoteMapping, NoteUpsert};
 pub use backend::{SourceWindow, StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents};
 pub use config::RunnerConfig;
 pub use protocol::{

@@ -5,7 +5,8 @@ use uuid::Uuid;
 use crate::error::RiverDataClientError;
 use crate::models::{
     AnnotationMapping, AnnotationUpsert, CommandStatus, CurveMapping, DataStream, GroupAudit,
-    IngestReading, IngestStatusEvent, RegisterStreamRequest, SensorMapping, SensorUpsert,
+    IngestReading, IngestStatusEvent, NoteMapping, NoteUpsert, RegisterStreamRequest,
+    SensorMapping, SensorUpsert,
     StandardCurveUpsert, SyncEventCreate,
     SyncEventRef, SyncEventUpdate,
 };
@@ -586,6 +587,41 @@ impl RiverDataClient {
             .await
             .map_err(|e| RiverDataClientError::Api(format!("parse annotations response: {e}")))?;
         Ok(parsed.annotations)
+    }
+
+    // ========================================================================
+    // Site notes
+    // ========================================================================
+
+    /// Register a source's site notes; idempotent per (source_system,
+    /// source_key). Returns one outcome per note, including the ones whose
+    /// station resolved to no site.
+    pub async fn register_notes(
+        &self,
+        source_system: &str,
+        notes: &[NoteUpsert],
+    ) -> Result<Vec<NoteMapping>, RiverDataClientError> {
+        #[derive(serde::Deserialize)]
+        struct RegisterResponse {
+            notes: Vec<NoteMapping>,
+        }
+
+        let body = serde_json::json!({
+            "source_system": source_system,
+            "notes": notes,
+        });
+        let resp = self
+            .send_authorized(
+                self.http_client.post(self.url("/notes/register")).json(&body),
+                "register_notes",
+            )
+            .await?;
+        let resp = self.check_response(resp).await?;
+        let parsed: RegisterResponse = resp
+            .json()
+            .await
+            .map_err(|e| RiverDataClientError::Api(format!("parse notes response: {e}")))?;
+        Ok(parsed.notes)
     }
 
     // ========================================================================

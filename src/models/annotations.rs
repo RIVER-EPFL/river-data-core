@@ -34,3 +34,29 @@ pub struct AnnotationMapping {
     /// created | updated | unchanged | frozen | unpaired
     pub status: String,
 }
+
+/// One source-authored site note to register. `source_key` identifies the note
+/// within the source system; registration is idempotent per
+/// (source_system, source_key).
+///
+/// `site_name` is the source's own station name, which the API resolves against
+/// sites that already exist. A note mints nothing: one naming a station
+/// river-data has never seen is reported `unresolved` and is re-asserted on a
+/// later cycle, once pairing has created the site.
+#[derive(Debug, Clone, Serialize)]
+pub struct NoteUpsert {
+    pub source_key: String,
+    pub site_name: String,
+    pub text: String,
+    pub verified: bool,
+}
+
+/// The API-side outcome for one registered note.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NoteMapping {
+    pub source_key: String,
+    /// None when the note could not be stored (`unresolved`).
+    pub id: Option<Uuid>,
+    /// created | updated | unchanged | unresolved
+    pub status: String,
+}

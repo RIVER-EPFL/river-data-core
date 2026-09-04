@@ -12,7 +12,7 @@ schedule. Enrollment, heartbeats, retries, token rotation, batching and remote c
 
 ```toml
 [dependencies]
-river-data-core = { version = "0.10", features = ["client"] }
+river-data-core = { version = "0.11", features = ["client"] }
 ```
 
 Common companion crates (`chrono`, `uuid`, `serde_json`, `tracing`, `async_trait`) are

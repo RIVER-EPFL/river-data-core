@@ -275,6 +275,12 @@ posts each to `POST /api/standard_curves/register` and hands the resulting `Curv
 superseded) to `apply_curve_mappings`. Readings then name the curve by `standard_curve_id`, and
 the descriptor of any stream carrying such claims names the curve's `sensor_id`.
 
+A source with its own field notes returns them from `discover_notes` (`NoteUpsert`:
+`source_key`, `site_name`, `text`, `verified`), registered after discovery through
+`POST /api/notes/register` and idempotent per `(source_system, source_key)`. `site_name` is the
+source's own station name, resolved against sites that already exist; a note mints nothing, so one
+naming a station river-data has never seen comes back `unresolved` and lands on a later cycle.
+
 `StreamReadings.annotations` carries source-authored notes on instants (`AnnotationUpsert`),
 registered after the readings through `POST /api/annotations/register`, idempotent per
 `(source_system, source_key)`. An annotation on an unpaired stream is reported `unpaired` and

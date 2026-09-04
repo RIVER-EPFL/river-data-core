@@ -1,5 +1,6 @@
 use crate::models::{
-    ColumnAssignment, CurveMapping, DataStream, SensorMapping, SensorUpsert, StandardCurveUpsert,
+    ColumnAssignment, CurveMapping, DataStream, NoteMapping, NoteUpsert, SensorMapping,
+    SensorUpsert, StandardCurveUpsert,
     StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents,
 };
 
@@ -41,6 +42,17 @@ pub trait SourceBackend: Send + Sync + 'static {
         &self,
         _mappings: &[SensorMapping],
     ) -> Result<(), BackendError> {
+        Ok(())
+    }
+
+    /// Source-authored site notes. Registered after streams, so a station's
+    /// site exists by the time its notes arrive. Default: none.
+    async fn discover_notes(&self) -> Result<Vec<NoteUpsert>, BackendError> {
+        Ok(Vec::new())
+    }
+
+    /// Receives the API-side outcome for each registered note. Default: ignored.
+    async fn apply_note_mappings(&self, _mappings: &[NoteMapping]) -> Result<(), BackendError> {
         Ok(())
     }
 
