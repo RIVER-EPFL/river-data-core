@@ -21,6 +21,10 @@ pub struct StreamDescriptor {
     pub sensor_id: Option<Uuid>,
     /// Replicate-family declaration; requires `measurement_type: "spot"`.
     pub replicates: Option<ReplicateSpec>,
+    /// The decimal places the source stores or presents this channel at. Pairing writes it onto
+    /// the slot where none is declared, and the public API expresses served values at it. None
+    /// leaves the slot undeclared, which is served unrounded.
+    pub decimal_places: Option<i16>,
 }
 
 /// Asks a backend for readings for one stream since a cursor.

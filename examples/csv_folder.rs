@@ -68,6 +68,7 @@ impl SourceBackend for CsvFolderBackend {
                     measurement_type: None,
                     sensor_id: None,
                     replicates: None,
+                    decimal_places: None,
                 }
             })
             .collect())
