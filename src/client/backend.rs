@@ -1,6 +1,6 @@
 use crate::models::{
     ColumnAssignment, CurveMapping, DataStream, NoteMapping, NoteUpsert, SensorMapping,
-    SensorUpsert, StandardCurveUpsert,
+    SensorUpsert, SourceInventory, StandardCurveUpsert,
     StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents,
 };
 
@@ -104,5 +104,17 @@ pub trait SourceBackend: Send + Sync + 'static {
         _payload: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, BackendError> {
         Err(format!("Unknown command: {command}").into())
+    }
+
+    /// Everything the source offers, taken or declined, for the source audit.
+    ///
+    /// The default answers with what discovery accepted, which is honest for a backend that
+    /// declines nothing. A backend that filters its source (a portal connector reading a wide
+    /// table, say) overrides this and reports the rest with a reason, because a declined column is
+    /// exactly what no window, receipt or reconciliation pass can see.
+    async fn source_inventory(&self) -> Result<SourceInventory, BackendError> {
+        Ok(SourceInventory::of_discovered(
+            &self.discover_streams().await?,
+        ))
     }
 }

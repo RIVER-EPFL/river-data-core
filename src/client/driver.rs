@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
+use crate::client::audit;
 use crate::client::backend::SourceBackend;
 use crate::client::river_data_client::{IngestOptions, RiverDataClient};
 use crate::client::service::SyncService;
@@ -524,6 +525,47 @@ impl SyncDriver {
         }
     }
 
+    /// SOURCE_AUDIT: everything the source holds against everything registered here, per group.
+    ///
+    /// This is the check the per-cycle reconciliation structurally cannot make. A window covers one
+    /// stream, so a column the connector declined and a station discovered after the last
+    /// registration pass are outside every window and named on no receipt. Read-only: it fetches no
+    /// readings and writes nothing.
+    async fn source_audit(
+        &self,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        let source_system = self.backend.source_system();
+        let inventory = self
+            .backend
+            .source_inventory()
+            .await
+            .map_err(|e| format!("source inventory: {e}"))?;
+        let registered = self
+            .api
+            .list_streams(Some(source_system), None)
+            .await
+            .map_err(|e| format!("list streams: {e}"))?;
+        let source_curves = self
+            .backend
+            .discover_standard_curves()
+            .await
+            .map_err(|e| format!("discover standard curves: {e}"))?;
+        let stored_curve_keys = self
+            .api
+            .list_standard_curve_keys(source_system)
+            .await
+            .map_err(|e| format!("list standard curves: {e}"))?;
+
+        let report = audit::compare(
+            source_system,
+            &inventory,
+            &registered,
+            &source_curves,
+            stored_curve_keys.as_deref(),
+        );
+        serde_json::to_value(report).map_err(|e| format!("serialize source audit: {e}").into())
+    }
+
     /// RESYNC_STREAMS: fetch the named streams from the start of history and
     /// ingest with overwrite, leaving flags and sample links untouched.
     async fn resync_streams(
@@ -738,6 +780,9 @@ impl SyncService for SyncDriver {
     ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
         if command == commands::RESYNC_STREAMS {
             return self.resync_streams(payload).await;
+        }
+        if command == commands::SOURCE_AUDIT {
+            return self.source_audit().await;
         }
         self.backend.handle_command(command, payload).await
     }

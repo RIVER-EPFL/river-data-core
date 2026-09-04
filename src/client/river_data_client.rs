@@ -553,6 +553,41 @@ impl RiverDataClient {
         Ok(mappings)
     }
 
+    /// The `(source_system, source_key)` set of lab curves this source has replicated here, for
+    /// the source audit. `Ok(None)` on an API that does not serve the collection, which is the
+    /// difference between "the store holds none" and "the store cannot be asked": reporting every
+    /// source curve as missing because the listing 404'd would be a false finding.
+    pub async fn list_standard_curve_keys(
+        &self,
+        source_system: &str,
+    ) -> Result<Option<Vec<String>>, RiverDataClientError> {
+        #[derive(serde::Deserialize)]
+        struct CurveRow {
+            source_key: Option<String>,
+        }
+
+        let filter = serde_json::json!({ "source_system": source_system }).to_string();
+        let resp = self
+            .send_authorized(
+                self.http_client.get(self.url("/standard_curves")).query(&[
+                    ("filter", filter.as_str()),
+                    ("range", "[0,9999]"),
+                    ("sort", r#"["id","ASC"]"#),
+                ]),
+                "list_standard_curves",
+            )
+            .await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let resp = self.check_response(resp).await?;
+        let rows: Vec<CurveRow> = resp
+            .json()
+            .await
+            .map_err(|e| RiverDataClientError::Api(format!("parse standard curves: {e}")))?;
+        Ok(Some(rows.into_iter().filter_map(|r| r.source_key).collect()))
+    }
+
     // ========================================================================
     // Annotations
     // ========================================================================

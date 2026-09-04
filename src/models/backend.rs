@@ -98,3 +98,69 @@ pub struct StreamStatusEvents {
     pub source_key: String,
     pub events: Vec<IngestStatusEvent>,
 }
+
+/// Everything the source holds that could become a stream, whether or not the connector takes it.
+///
+/// `discover_streams` reports what a connector accepted, so a column it declined and a group it has
+/// not discovered yet are invisible to every downstream check: no completeness window covers them,
+/// no receipt names them, and reconciliation cannot speak about them at all. This is what a sign-off
+/// against a retiring source has to read.
+///
+/// Taken channels are listed per group because that is the question being asked (is this station,
+/// whole, here); declined channels are listed once, source-wide, because a source declines a
+/// channel by its own rules and not per group.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct SourceInventory {
+    /// One entry per channel the connector carries, keyed as it registers.
+    pub candidates: Vec<SourceCandidate>,
+    /// Channels the source holds and the connector does not carry, with the connector's reason.
+    #[serde(default)]
+    pub declined: Vec<DeclinedChannel>,
+    /// Every group the source holds, so one with no channel at all is still named.
+    #[serde(default)]
+    pub groups: Vec<String>,
+}
+
+/// One channel the connector carries.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SourceCandidate {
+    /// The key it registers under.
+    pub source_key: String,
+    /// The source's own grouping: the station, the location, whatever a report is read by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+}
+
+/// One channel the connector leaves behind, and why.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DeclinedChannel {
+    /// The source's own name for it: a column, a location id.
+    pub channel: String,
+    pub reason: String,
+}
+
+impl SourceInventory {
+    /// The inventory a backend that declines nothing has: every descriptor it discovered.
+    #[must_use]
+    pub fn of_discovered(descriptors: &[StreamDescriptor]) -> Self {
+        let candidates: Vec<SourceCandidate> = descriptors
+            .iter()
+            .map(|d| SourceCandidate {
+                source_key: d.source_key.clone(),
+                group: d.source_path.split('/').nth(1).map(ToString::to_string),
+            })
+            .collect();
+        let mut groups: Vec<String> = candidates
+            .iter()
+            .filter_map(|c| c.group.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        groups.sort();
+        Self {
+            candidates,
+            declined: Vec::new(),
+            groups,
+        }
+    }
+}
