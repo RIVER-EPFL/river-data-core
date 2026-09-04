@@ -250,6 +250,21 @@ A stream whose readings are replicate groups (three DOC vials at one instant) de
 Set `StreamReadings.collection = true` so the server groups the payload per instant and
 materialises `samples` rows.
 
+### Instruments
+
+A source with its own instrument register introduces those instruments before anything else:
+return them from `discover_instruments` (`SensorUpsert`: `source_key`, `name`, `serial_number`,
+`manufacturer`, `model`, `notes`, `is_lab_instrument`, `metadata`), idempotent per
+`(source_system, source_key)`. The driver posts each to `POST /api/sensors/register` and hands the
+resulting `SensorMapping`s to `apply_instrument_mappings`.
+
+This is for instruments that have no stream of their own. Every other instrument is minted as a
+side effect of registering the stream that names it, so a backend whose instruments all stream
+needs none of this. An instrument the API already holds under the key is returned untouched
+(`created: false`), because what an operator recorded on it outranks what the source repeats. A
+`serial_number` another instrument already holds is not claimed; the response names the holder in
+`serial_claimed_by` and the registration still succeeds.
+
 ### Standard curves and annotations
 
 A source with lab calibration curves registers them before its streams: return them from
