@@ -12,7 +12,7 @@ schedule. Enrollment, heartbeats, retries, token rotation, batching and remote c
 
 ```toml
 [dependencies]
-river-data-core = { version = "0.5", features = ["client"] }
+river-data-core = { version = "0.9", features = ["client"] }
 ```
 
 Common companion crates (`chrono`, `uuid`, `serde_json`, `tracing`, `async_trait`) are
@@ -37,6 +37,7 @@ async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError> 
         metadata: json!({ "units": "degC" }),
         measurement_type: Some("continuous".to_string()),
         sensor_id: None,
+        replicates: None,
     }])
 }
 ```
@@ -46,10 +47,12 @@ Keep it stable across restarts: a changed key registers as a new, empty stream.
 `measurement_type` is `"continuous"` for logger data or `"spot"` for grab samples.
 `sensor_id` names the instrument behind the stream when your backend already knows it;
 leave it `None` and the server resolves the instrument from the metadata serial when the
-stream is imported or paired.
+stream is imported or paired. `replicates` declares a replicate family (grab samples taken in
+several vials at one instant); `None` for a plain series.
 
 Second, fetch new readings. Each request carries `since`, the time of the newest reading
-river-data already has for that stream, so you only return what is new:
+river-data already has for that stream, so you only return what is new. This is the
+[examples/csv_folder.rs](examples/csv_folder.rs) version, one stream per `time,value` file:
 
 ```rust
 async fn fetch_readings(
@@ -58,14 +61,22 @@ async fn fetch_readings(
 ) -> Result<Vec<StreamReadings>, BackendError> {
     let mut out = Vec::new();
     for req in requests {
-        let readings = my_rows_newer_than(req.since)   // your data access goes here
+        let path = self.dir.join(format!("{}.csv", req.source_key));
+        let content = std::fs::read_to_string(&path)?;
+
+        // Keep only rows newer than the cursor so re-syncs don't re-send
+        let readings: Vec<IngestReading> = content
+            .lines()
+            .filter_map(parse_row)
+            .filter(|(time, _)| req.since.is_none_or(|s| *time > s))
             .map(|(time, value)| IngestReading::new(time, value))
             .collect();
-        out.push(StreamReadings {
-            stream_id: req.stream_id,
-            source_key: req.source_key.clone(),
+
+        out.push(StreamReadings::new(
+            req.stream_id,
+            req.source_key.clone(),
             readings,
-        });
+        ));
     }
     Ok(out)
 }
@@ -109,6 +120,11 @@ deduplicated server-side, so returning overlap is safe.
 `time,value` CSV files, one stream per file (useful as a template for lab exports).
 It reads the folder named by `DATA_DIR` (default `./data`).
 
+**Mutable sources.** A source that is edited in place (a portal database) cannot be synced
+by cursor. Declare `reconciled()` and attach a completeness window to each fetch; the server
+diffs stored content against the payload, corrects changed values and withdraws absent rows.
+[examples/reconciled_backend.rs](examples/reconciled_backend.rs) is the template.
+
 **Status events.** Override `fetch_status_events` to report device telemetry (battery,
 signal, reachability) alongside readings. The default reports nothing.
 
@@ -116,8 +132,13 @@ signal, reachability) alongside readings. The default reports nothing.
 dashboard beyond the built-in sync/pause/resume set.
 
 **Real services.** [river-data-sync-vaisala](https://github.com/RIVER-EPFL/river-data-sync-vaisala)
-is an HTTP source with status events; river-data-rshiny reads three MySQL portal
-schemas behind one binary. Both are under 900 lines.
+is an HTTP source with status events;
+[river-data-rshiny](https://github.com/RIVER-EPFL/river-data-rshiny) reads three MySQL portal
+schemas behind one binary.
+
+**Onboarding a new source.** [docs/sync-service-onboarding.md](docs/sync-service-onboarding.md)
+covers credentials, the control plane, stream identity, replicate families, standard curves,
+reconciled sources, pairing and migration, with the two real services as worked examples.
 
 **Full control.** If the driver's cycle does not fit your source, implement the
 `SyncService` trait instead and drive `SyncServiceRunner` from your own `main`.
@@ -138,16 +159,6 @@ schemas behind one binary. Both are under 900 lines.
 | `RUST_LOG` | Log filter | `info` |
 
 Variables are also read from a `.env` file in the working directory.
-
-## Toolbox
-
-Rust ports of the RIVER lab calculation functions originally written in R, gated behind
-bulk random cases).
-
-```bash
-Rscript r_reference/generate_fixtures.R               # regenerate fixtures (R >= 4.0, jsonlite)
-Rscript r_reference/verify_integrity.R <portal_source.R>   # verify R sources are byte-exact copies
-```
 
 ## Features
 

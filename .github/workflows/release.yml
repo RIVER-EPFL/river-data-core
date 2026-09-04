@@ -35,6 +35,14 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match crate version $crate_version"
             exit 1
           fi
+      - name: Check README install snippet matches crate version
+        run: |
+          crate_version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          major_minor="${crate_version%.*}"
+          if ! grep -q "river-data-core = { version = \"$major_minor\"" README.md; then
+            echo "README install snippet does not pin version $major_minor (crate is $crate_version)"
+            exit 1
+          fi
       - name: Publish river-data-core
         run: cargo publish
         env:
