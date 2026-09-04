@@ -12,9 +12,6 @@ pub trait SourceBackend: Send + Sync + 'static {
     /// The source_system string streams register under (ie. "vaisala", "cnet").
     fn source_system(&self) -> &str;
 
-    /// Run discovery on every cycle instead of once at startup plus full syncs.
-    /// Return true when discovery is cheap and new streams appear without
-    /// operator action (ie. rows added to a portal database).
     /// Whether this backend replicates a mutable source by re-reading its full content each
     /// cycle. When true, the driver fetches with no cursor (`since: None`) on every pass, so the
     /// backend can attach completeness windows and the store converges on the source
@@ -23,6 +20,9 @@ pub trait SourceBackend: Send + Sync + 'static {
         false
     }
 
+    /// Run discovery on every cycle instead of once at startup plus full syncs.
+    /// Return true when discovery is cheap and new streams appear without
+    /// operator action (ie. rows added to a portal database).
     fn rediscover_every_cycle(&self) -> bool {
         false
     }

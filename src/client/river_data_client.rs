@@ -26,9 +26,10 @@ pub struct IngestOutcome {
     pub skipped: u64,
     /// One entry per rejection kind, with its count.
     pub skipped_reasons: Vec<String>,
-    /// Readings withheld pending audit acknowledgement. The API caps the
-    /// stream cursor below the earliest held group, so the next incremental
-    /// fetch re-sends them; no client-side handling beyond reporting.
+    /// Always 0. The replicate audit admits every group and records a
+    /// disagreement as a review hold (ADR 0002); the API never withholds a
+    /// reading or caps the stream cursor, so nothing is re-sent. Kept on the
+    /// wire for older API images and reported as received, never acted on.
     pub held: u64,
     /// Windowed diff: stored rows whose source value changed and were corrected in place.
     pub changed: u64,
@@ -52,6 +53,7 @@ pub struct BatchedIngest {
     pub inserted: u64,
     pub skipped: u64,
     pub skipped_reasons: Vec<String>,
+    /// Always 0; see [`IngestOutcome::held`].
     pub held: u64,
     pub changed: u64,
     pub withdrawn: u64,

@@ -108,8 +108,9 @@ pub struct SyncResult {
     /// predates the field must still parse the rest.
     #[serde(default)]
     pub readings_skipped: u64,
-    /// Readings withheld pending audit acknowledgement; the API re-sends them
-    /// on the next incremental fetch.
+    /// Always 0. The API admits every replicate group and records a
+    /// disagreement as a review hold (ADR 0002) rather than withholding
+    /// readings; nothing is re-sent. Kept on the wire for older readers.
     #[serde(default)]
     pub readings_held: u64,
     pub status_events_synced: u64,
