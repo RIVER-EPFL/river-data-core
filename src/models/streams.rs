@@ -47,6 +47,9 @@ pub struct RegisterStreamRequest {
     /// Replicate-family declaration; requires `measurement_type: "spot"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replicates: Option<ReplicateSpec>,
+    /// The source's decimal places for this channel (0 to 10). None declares nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decimal_places: Option<i16>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,12 +124,31 @@ mod tests {
             measurement_type: None,
             sensor_id: None,
             replicates: None,
+            decimal_places: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["source_system"], "test_system");
         assert_eq!(json["metadata"]["device"], "dev_001");
         assert!(json.get("sensor_id").is_none());
         assert!(json.get("replicates").is_none());
+        assert!(json.get("decimal_places").is_none());
+    }
+
+    #[test]
+    fn test_register_stream_request_declares_decimal_places() {
+        let req = RegisterStreamRequest {
+            source_system: "cnet".to_string(),
+            source_key: "VAD:DOC_rep_1".to_string(),
+            source_name: None,
+            source_path: None,
+            metadata: serde_json::json!({}),
+            measurement_type: Some("spot".to_string()),
+            sensor_id: None,
+            replicates: None,
+            decimal_places: Some(2),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["decimal_places"], 2);
     }
 
     #[test]
@@ -147,6 +169,7 @@ mod tests {
                 calc: Some("calcDOCavg".into()),
                 sd_estimator: None,
             }),
+            decimal_places: Some(2),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["measurement_type"], "spot");

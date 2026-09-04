@@ -26,6 +26,7 @@ impl SourceBackend for DemoBackend {
             measurement_type: Some("continuous".to_string()),
             sensor_id: None,
             replicates: None,
+            decimal_places: None,
         }])
     }
 

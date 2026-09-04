@@ -167,6 +167,7 @@ impl SyncDriver {
                 measurement_type: d.measurement_type.clone(),
                 sensor_id: d.sensor_id,
                 replicates: d.replicates.clone(),
+                decimal_places: d.decimal_places,
             };
             // A descriptor identical to the last successfully registered one converges to the
             // same server state; re-sending it is pure write churn. A full sync re-asserts all.
