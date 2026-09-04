@@ -58,3 +58,7 @@ required-features = ["client"]
 [[example]]
 name = "csv_folder"
 required-features = ["client"]
+
+[[example]]
+name = "reconciled_backend"
+required-features = ["client"]
