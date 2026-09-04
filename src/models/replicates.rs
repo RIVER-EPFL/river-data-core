@@ -87,6 +87,45 @@ pub struct StandardCurveUpsert {
     pub name: Option<String>,
 }
 
+/// One instrument from a source's own register, to introduce into river-data.
+///
+/// For a source whose instruments do not each have a stream: every other instrument is minted as a
+/// side effect of registering the stream that names it, and a portal's instrument register has no
+/// streams to mint from. Registration is idempotent per (source_system, source_key), and a row the
+/// API already holds under that key is never rewritten.
+#[derive(Debug, Clone, Serialize)]
+pub struct SensorUpsert {
+    /// The instrument's identity within the source, e.g. "sensor_inventory:62".
+    pub source_key: String,
+    pub name: String,
+    /// The lab's own serial. The API claims it only when no other instrument holds it, and says
+    /// which one does when it declines.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serial_number: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manufacturer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// True for an instrument that corrects a grab in the lab rather than standing in a river.
+    pub is_lab_instrument: bool,
+    /// Whatever the source knows that river-data has no column for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// The API-side identity a registered instrument resolved to.
+#[derive(Debug, Clone)]
+pub struct SensorMapping {
+    pub source_key: String,
+    pub id: Uuid,
+    /// False when the API already held an instrument under this key.
+    pub created: bool,
+    /// The instrument already holding the offered serial, when the API declined to claim it.
+    pub serial_claimed_by: Option<Uuid>,
+}
+
 /// The API-side identity a registered curve resolved to.
 #[derive(Debug, Clone)]
 pub struct CurveMapping {
@@ -115,6 +154,27 @@ mod tests {
         assert_eq!(json["portal_mean_column"], "DIC_avg");
         assert!(json.get("portal_sd_column").is_none());
         assert!(json.get("curve_ref_column").is_none());
+    }
+
+    #[test]
+    fn sensor_upsert_skips_absent_fields() {
+        let up = SensorUpsert {
+            source_key: "sensor_inventory:62".into(),
+            name: "ANU TURB".into(),
+            serial_number: Some("919402".into()),
+            manufacturer: None,
+            model: Some("Cyclops-7".into()),
+            notes: None,
+            is_lab_instrument: false,
+            metadata: None,
+        };
+        let json = serde_json::to_value(&up).unwrap();
+        assert_eq!(json["source_key"], "sensor_inventory:62");
+        assert_eq!(json["serial_number"], "919402");
+        assert_eq!(json["is_lab_instrument"], false);
+        assert!(json.get("manufacturer").is_none());
+        assert!(json.get("notes").is_none());
+        assert!(json.get("metadata").is_none());
     }
 
     #[test]

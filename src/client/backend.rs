@@ -1,6 +1,6 @@
 use crate::models::{
-    ColumnAssignment, CurveMapping, DataStream, StandardCurveUpsert, StreamDescriptor,
-    StreamFetchRequest, StreamReadings, StreamStatusEvents,
+    ColumnAssignment, CurveMapping, DataStream, SensorMapping, SensorUpsert, StandardCurveUpsert,
+    StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents,
 };
 
 pub type BackendError = Box<dyn std::error::Error + Send + Sync>;
@@ -29,6 +29,20 @@ pub trait SourceBackend: Send + Sync + 'static {
 
     /// Enumerate the streams this source provides.
     async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError>;
+
+    /// Instruments from the source's own register, for instruments that have no stream of their
+    /// own to be minted from. Registered before curves and streams. Default: none.
+    async fn discover_instruments(&self) -> Result<Vec<SensorUpsert>, BackendError> {
+        Ok(Vec::new())
+    }
+
+    /// Receives the API-side identities the discovered instruments resolved to. Default: ignored.
+    async fn apply_instrument_mappings(
+        &self,
+        _mappings: &[SensorMapping],
+    ) -> Result<(), BackendError> {
+        Ok(())
+    }
 
     /// Standard curves to register with the API before stream registration.
     /// Default: none.

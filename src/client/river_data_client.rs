@@ -5,7 +5,8 @@ use uuid::Uuid;
 use crate::error::RiverDataClientError;
 use crate::models::{
     AnnotationMapping, AnnotationUpsert, CommandStatus, CurveMapping, DataStream, GroupAudit,
-    IngestReading, IngestStatusEvent, RegisterStreamRequest, StandardCurveUpsert, SyncEventCreate,
+    IngestReading, IngestStatusEvent, RegisterStreamRequest, SensorMapping, SensorUpsert,
+    StandardCurveUpsert, SyncEventCreate,
     SyncEventRef, SyncEventUpdate,
 };
 
@@ -455,6 +456,53 @@ impl RiverDataClient {
             }
         }
         result
+    }
+
+    // ========================================================================
+    // Instruments
+    // ========================================================================
+
+    /// Register a source's own instruments; idempotent per (source_system,
+    /// source_key). Returns the API-side identity of every instrument
+    /// registered, including whether it was already present and whether its
+    /// serial was claimed.
+    pub async fn register_sensors(
+        &self,
+        source_system: &str,
+        sensors: &[SensorUpsert],
+    ) -> Result<Vec<SensorMapping>, RiverDataClientError> {
+        #[derive(serde::Deserialize)]
+        struct SensorResponse {
+            id: Uuid,
+            #[serde(default)]
+            created: bool,
+            #[serde(default)]
+            serial_claimed_by: Option<Uuid>,
+        }
+
+        let mut mappings = Vec::with_capacity(sensors.len());
+        for sensor in sensors {
+            let mut body = serde_json::to_value(sensor)
+                .map_err(|e| RiverDataClientError::Api(format!("serialize instrument: {e}")))?;
+            body["source_system"] = serde_json::Value::String(source_system.to_string());
+            let resp = self
+                .send_authorized(
+                    self.http_client.post(self.url("/sensors/register")).json(&body),
+                    "register_sensor",
+                )
+                .await?;
+            let resp = self.check_response(resp).await?;
+            let parsed: SensorResponse = resp.json().await.map_err(|e| {
+                RiverDataClientError::Api(format!("parse instrument response: {e}"))
+            })?;
+            mappings.push(SensorMapping {
+                source_key: sensor.source_key.clone(),
+                id: parsed.id,
+                created: parsed.created,
+                serial_claimed_by: parsed.serial_claimed_by,
+            });
+        }
+        Ok(mappings)
     }
 
     // ========================================================================

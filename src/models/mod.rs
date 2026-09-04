@@ -14,7 +14,8 @@ pub use protocol::{
     PendingCommand, SyncEventCreate, SyncEventRef, SyncEventUpdate, SyncResult, SyncTrigger,
 };
 pub use replicates::{
-    ColumnAssignment, CurveMapping, GroupAudit, ReplicateSpec, StandardCurveUpsert,
+    ColumnAssignment, CurveMapping, GroupAudit, ReplicateSpec, SensorMapping, SensorUpsert,
+    StandardCurveUpsert,
 };
 pub use status::{CommandStatus, ServiceStatus, SyncEventStatus, SyncEventType};
 pub use streams::{DataStream, IngestReading, IngestStatusEvent, RegisterStreamRequest};

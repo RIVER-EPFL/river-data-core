@@ -108,6 +108,48 @@ impl SyncDriver {
         }
     }
 
+    /// Register the backend's own instruments and hand the resulting mappings
+    /// back. Runs before curves and stream registration: an instrument a curve
+    /// or a descriptor names has to exist first.
+    async fn sync_instruments(&self, result: &mut SyncResult) {
+        let sensors = match self.backend.discover_instruments().await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "Instrument discovery failed");
+                result.errors.push(format!("Instrument discovery: {e}"));
+                return;
+            }
+        };
+        if sensors.is_empty() {
+            return;
+        }
+        let mappings = match self
+            .api
+            .register_sensors(self.backend.source_system(), &sensors)
+            .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(error = %e, "Instrument registration failed");
+                result.errors.push(format!("Instrument registration: {e}"));
+                return;
+            }
+        };
+        if let Err(e) = self.backend.apply_instrument_mappings(&mappings).await {
+            tracing::warn!(error = %e, "Applying instrument mappings failed");
+            result.errors.push(format!("Instrument mappings: {e}"));
+            return;
+        }
+        let unclaimed = mappings
+            .iter()
+            .filter(|m| m.serial_claimed_by.is_some())
+            .count();
+        result.log.push(format!(
+            "Instruments: {} registered, {unclaimed} serials already held",
+            mappings.len()
+        ));
+    }
+
     /// Register the backend's standard curves and hand the resulting mappings
     /// back. Runs before stream registration: curve-carrying descriptors need
     /// the mapped sensor ids, and readings need the curve UUIDs.
@@ -588,8 +630,9 @@ impl SyncService for SyncDriver {
     ) -> Result<SyncResult, Box<dyn std::error::Error + Send + Sync>> {
         let mut result = SyncResult::default();
 
-        // Curves before registration and fetch: descriptors and readings both
-        // depend on the mappings.
+        // Instruments before curves, curves before registration and fetch:
+        // each step's mappings are the next one's input.
+        self.sync_instruments(&mut result).await;
         self.sync_curves(&mut result).await;
 
         if full || !self.discovered.load(Ordering::Relaxed) || self.backend.rediscover_every_cycle()
