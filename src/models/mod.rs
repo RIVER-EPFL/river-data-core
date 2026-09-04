@@ -7,7 +7,10 @@ mod status;
 mod streams;
 
 pub use annotations::{AnnotationMapping, AnnotationUpsert, NoteMapping, NoteUpsert};
-pub use backend::{SourceWindow, StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents};
+pub use backend::{
+    DeclinedChannel, SourceCandidate, SourceInventory, SourceWindow, StreamDescriptor,
+    StreamFetchRequest, StreamReadings, StreamStatusEvents,
+};
 pub use config::RunnerConfig;
 pub use protocol::{
     CommandUpdateRequest, EnrollRequest, EnrollResponse, HeartbeatRequest, HeartbeatResponse,

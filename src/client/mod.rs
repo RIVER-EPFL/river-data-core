@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod backend;
 pub mod bootstrap;
 pub mod control_plane;
@@ -7,6 +8,7 @@ pub mod runner;
 pub mod service;
 
 pub use crate::models::{StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents};
+pub use audit::{AuditTotals, CurveAudit, SourceAuditReport, SourceGroupReport};
 pub use backend::{BackendError, SourceBackend};
 pub use bootstrap::run_sync_service;
 pub use control_plane::ControlPlaneClient;

@@ -5,3 +5,6 @@ pub const RESUME: &str = "resume";
 /// Re-fetch named streams from the start of history and ingest with overwrite.
 /// Payload: `{ "source_keys": [...], "overwrite": true }`.
 pub const RESYNC_STREAMS: &str = "resync_streams";
+/// Walk everything the source holds and compare it against what is registered here.
+/// Read-only: it writes nothing and its result is the report. Payload: none.
+pub const SOURCE_AUDIT: &str = "source_audit";
