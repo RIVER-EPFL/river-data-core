@@ -63,6 +63,7 @@ impl SourceBackend for TableBackend {
             measurement_type: Some("spot".to_string()),
             sensor_id: None,
             replicates: None,
+            decimal_places: None,
         }])
     }
 
