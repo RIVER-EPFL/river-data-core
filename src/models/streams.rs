@@ -30,7 +30,8 @@ pub struct DataStream {
     pub replicates: Option<Vec<ColumnAssignment>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RegisterStreamRequest {
     pub source_system: String,
     pub source_key: String,
@@ -38,38 +39,39 @@ pub struct RegisterStreamRequest {
     pub source_path: Option<String>,
     pub metadata: serde_json::Value,
     /// Stream-level classification declared at discovery. None never clears an operator-set value.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub measurement_type: Option<String>,
     /// Owning sensor. Required for curve-carrying streams: the API admits a
     /// reading's curve claim only when reading-sensor == curve-sensor.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensor_id: Option<Uuid>,
     /// Replicate-family declaration; requires `measurement_type: "spot"`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replicates: Option<ReplicateSpec>,
     /// The source's decimal places for this channel (0 to 10). None declares nothing.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decimal_places: Option<i16>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct IngestReading {
     pub time: chrono::DateTime<chrono::Utc>,
     pub raw_value: f64,
-    #[serde(skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub replicate_index: i16,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensor_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calibration_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deployment_id: Option<Uuid>,
     /// Per-reading override ('continuous' | 'spot' | 'derived'). None resolves server-side from
     /// the stream default, then the owning sensor's data_frequency.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub measurement_type: Option<String>,
     /// Standard curve the source applied to this reading.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standard_curve_id: Option<Uuid>,
 }
 
@@ -93,7 +95,8 @@ fn is_zero(v: &i16) -> bool {
     *v == 0
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct IngestStatusEvent {
     pub time: chrono::DateTime<chrono::Utc>,
     pub value: String,
@@ -102,6 +105,63 @@ pub struct IngestStatusEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The API is the receiver of these three, so what the client sends must read back unchanged.
+    #[test]
+    fn ingest_reading_round_trips() {
+        let mut r = IngestReading::new(chrono::Utc::now(), 42.5);
+        r.replicate_index = 2;
+        r.standard_curve_id = Some(Uuid::nil());
+        r.measurement_type = Some("spot".into());
+        let back: IngestReading =
+            serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+        assert_eq!(back.raw_value, 42.5);
+        assert_eq!(back.replicate_index, 2);
+        assert_eq!(back.measurement_type.as_deref(), Some("spot"));
+        assert_eq!(back.standard_curve_id, Some(Uuid::nil()));
+    }
+
+    /// Replicate 0 is omitted on the wire, so the receiver must read an absent index as 0 rather
+    /// than refusing the reading.
+    #[test]
+    fn an_omitted_replicate_index_reads_as_zero() {
+        let r = IngestReading::new(chrono::Utc::now(), 1.0);
+        let json = serde_json::to_value(&r).unwrap();
+        assert!(json.get("replicate_index").is_none());
+        let back: IngestReading = serde_json::from_value(json).unwrap();
+        assert_eq!(back.replicate_index, 0);
+    }
+
+    #[test]
+    fn register_stream_request_round_trips() {
+        let req = RegisterStreamRequest {
+            source_system: "cnet".to_string(),
+            source_key: "FP1:DOC_avg_ppb:reps".to_string(),
+            source_name: Some("DOC".to_string()),
+            source_path: None,
+            metadata: serde_json::json!({"station": "FP1"}),
+            measurement_type: Some("spot".to_string()),
+            sensor_id: Some(Uuid::nil()),
+            replicates: None,
+            decimal_places: Some(2),
+        };
+        let back: RegisterStreamRequest =
+            serde_json::from_value(serde_json::to_value(&req).unwrap()).unwrap();
+        assert_eq!(back.source_key, req.source_key);
+        assert_eq!(back.decimal_places, Some(2));
+        assert_eq!(back.sensor_id, Some(Uuid::nil()));
+    }
+
+    #[test]
+    fn ingest_status_event_round_trips() {
+        let e = IngestStatusEvent {
+            time: chrono::Utc::now(),
+            value: "unreachable".to_string(),
+        };
+        let back: IngestStatusEvent =
+            serde_json::from_value(serde_json::to_value(&e).unwrap()).unwrap();
+        assert_eq!(back.value, "unreachable");
+    }
 
     #[test]
     fn test_ingest_reading_serialization() {

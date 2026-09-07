@@ -9,6 +9,7 @@ use uuid::Uuid;
 /// The API requires at least two unique columns and `measurement_type: "spot"`
 /// on the request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ReplicateSpec {
     pub source_columns: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -31,6 +32,7 @@ pub struct ReplicateSpec {
 /// `replicates.assignments`). Sync services assign each value's
 /// `replicate_index` by looking its source column up here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ColumnAssignment {
     pub column: String,
     pub index: i16,
@@ -84,12 +86,13 @@ impl ColumnAssignment {
 
 /// Portal-precomputed mean/sd for one replicate group, sent alongside the
 /// group's readings so the API can compare server-side.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct GroupAudit {
     pub time: DateTime<Utc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_mean: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_sd: Option<f64>,
     /// Count of non-null replicate cells the portal row carries for this
     /// instant; the API re-counts after admission, so a divergence surfaces
@@ -101,7 +104,8 @@ pub struct GroupAudit {
 /// One portal standard curve to register. `source_key` identifies the curve
 /// within the source system; registration is idempotent per (source_system,
 /// source_key).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StandardCurveUpsert {
     pub source_key: String,
     /// The portal curve's parameter label; the API finds-or-creates one lab
@@ -109,12 +113,12 @@ pub struct StandardCurveUpsert {
     pub instrument_label: String,
     pub slope: f64,
     pub intercept: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub r_squared: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// The date the source fitted the curve, which is how the lab identifies one.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fitted_on: Option<chrono::NaiveDate>,
 }
 
@@ -124,25 +128,26 @@ pub struct StandardCurveUpsert {
 /// side effect of registering the stream that names it, and a portal's instrument register has no
 /// streams to mint from. Registration is idempotent per (source_system, source_key), and a row the
 /// API already holds under that key is never rewritten.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SensorUpsert {
     /// The instrument's identity within the source, e.g. "sensor_inventory:62".
     pub source_key: String,
     pub name: String,
     /// The lab's own serial. The API claims it only when no other instrument holds it, and says
     /// which one does when it declines.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_number: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manufacturer: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     /// True for an instrument that corrects a grab in the lab rather than standing in a river.
     pub is_lab_instrument: bool,
     /// Whatever the source knows that river-data has no column for.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
 }
 
@@ -169,6 +174,72 @@ pub struct CurveMapping {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The API receives the declaration, the pinned mapping, the audit expectations and both
+    /// registers, so each must read back as what the client sent.
+    #[test]
+    fn the_registered_wire_types_round_trip() {
+        let spec = ReplicateSpec {
+            source_columns: vec!["DOC_rep_1".into(), "DOC_rep_2".into()],
+            portal_mean_column: Some("DOC_avg".into()),
+            portal_sd_column: None,
+            curve_ref_column: None,
+            calc: Some("calcMean".into()),
+            sd_estimator: Some("population".into()),
+        };
+        let back: ReplicateSpec =
+            serde_json::from_value(serde_json::to_value(&spec).unwrap()).unwrap();
+        assert_eq!(back.source_columns, spec.source_columns);
+        assert_eq!(back.sd_estimator.as_deref(), Some("population"));
+
+        let audit = GroupAudit {
+            time: Utc::now(),
+            expected_mean: Some(1.5),
+            expected_sd: Some(0.1),
+            expected_n: Some(3),
+        };
+        let back: GroupAudit =
+            serde_json::from_value(serde_json::to_value(&audit).unwrap()).unwrap();
+        assert_eq!(back.expected_n, Some(3));
+
+        let curve = StandardCurveUpsert {
+            source_key: "standard_curves:3".into(),
+            instrument_label: "DOC corr".into(),
+            slope: 1.0,
+            intercept: 0.0,
+            r_squared: None,
+            name: Some("DOC corr 2021-01-28".into()),
+            fitted_on: chrono::NaiveDate::from_ymd_opt(2021, 1, 28),
+        };
+        let back: StandardCurveUpsert =
+            serde_json::from_value(serde_json::to_value(&curve).unwrap()).unwrap();
+        assert_eq!(back.fitted_on, curve.fitted_on);
+        assert!(back.r_squared.is_none());
+
+        let sensor = SensorUpsert {
+            source_key: "sensor_inventory:62".into(),
+            name: "ANU TURB".into(),
+            serial_number: Some("919402".into()),
+            manufacturer: None,
+            model: Some("Cyclops-7".into()),
+            notes: None,
+            is_lab_instrument: false,
+            metadata: None,
+        };
+        let back: SensorUpsert =
+            serde_json::from_value(serde_json::to_value(&sensor).unwrap()).unwrap();
+        assert_eq!(back.serial_number.as_deref(), Some("919402"));
+        assert!(!back.is_lab_instrument);
+
+        let assignment = ColumnAssignment {
+            column: "DOC_rep_2".into(),
+            index: 1,
+            retired: true,
+        };
+        let back: ColumnAssignment =
+            serde_json::from_value(serde_json::to_value(&assignment).unwrap()).unwrap();
+        assert_eq!(back, assignment);
+    }
 
     #[test]
     fn replicate_spec_skips_absent_fields() {

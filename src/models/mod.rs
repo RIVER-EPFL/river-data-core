@@ -1,6 +1,7 @@
 mod annotations;
 mod backend;
 mod config;
+mod measurement;
 mod protocol;
 mod replicates;
 mod status;
@@ -12,6 +13,7 @@ pub use backend::{
     StreamFetchRequest, StreamReadings, StreamStatusEvents,
 };
 pub use config::RunnerConfig;
+pub use measurement::MeasurementType;
 pub use protocol::{
     CommandUpdateRequest, EnrollRequest, EnrollResponse, HeartbeatRequest, HeartbeatResponse,
     PendingCommand, SyncEventCreate, SyncEventRef, SyncEventUpdate, SyncResult, SyncTrigger,
