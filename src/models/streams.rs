@@ -22,10 +22,10 @@ pub struct DataStream {
     /// Absent on APIs that predate the handshake; the client then sends full windows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_window_digest: Option<String>,
-    /// The authoritative replicate column-to-index mapping, present on a
-    /// register response for a stream declaring a replicate family. Absent on
-    /// list responses and on APIs that predate pinning; the same list persists
-    /// under `metadata.replicates.assignments`.
+    /// The authoritative replicate column-to-index mapping, present on the
+    /// register and list responses for a stream declaring a replicate family.
+    /// Absent on an API that predates it; the same list is then read out of
+    /// `metadata.replicates`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replicates: Option<Vec<ColumnAssignment>>,
 }

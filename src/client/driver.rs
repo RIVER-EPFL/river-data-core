@@ -303,14 +303,20 @@ impl SyncDriver {
         ));
     }
 
-    /// Hand the backend the pinned replicate mapping each listed stream's
-    /// metadata persists. The register response already delivered the fresh
-    /// copy on cycles that ran discovery; this covers cycles that skipped it
-    /// and the resync command, so index assignment never falls back to column
-    /// position merely because discovery did not run in this process.
+    /// Hand the backend the replicate mapping each listed stream carries. The
+    /// API resolves it on the list response; an API that predates that field
+    /// leaves the same answer to be read out of the stream's own metadata. The
+    /// register response already delivered the fresh copy on cycles that ran
+    /// discovery; this covers cycles that skipped it and the resync command, so
+    /// index assignment never falls back to column position merely because
+    /// discovery did not run in this process.
     async fn apply_persisted_assignments(&self, streams: &[DataStream]) {
         for s in streams {
-            let Some(assignments) = ColumnAssignment::from_metadata(&s.metadata) else {
+            let Some(assignments) = s
+                .replicates
+                .clone()
+                .or_else(|| ColumnAssignment::from_metadata(&s.metadata))
+            else {
                 continue;
             };
             if let Err(e) = self

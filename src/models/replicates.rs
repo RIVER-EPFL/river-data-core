@@ -41,16 +41,44 @@ pub struct ColumnAssignment {
 }
 
 impl ColumnAssignment {
-    /// The pinned mapping a stream's metadata carries, when the API has
-    /// authored one. None on metadata written by an API that predates pinning.
+    /// The mapping a stream's metadata carries, resolved the way the API
+    /// resolves it. None when the stream declares no replicate family.
     pub fn from_metadata(metadata: &serde_json::Value) -> Option<Vec<Self>> {
-        let value = metadata.get("replicates")?.get("assignments")?;
-        let assignments: Vec<Self> = serde_json::from_value(value.clone()).ok()?;
-        if assignments.is_empty() {
-            None
+        let spec = metadata.get("replicates")?;
+        let pinned: Vec<Self> = spec
+            .get("assignments")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let source_columns: Vec<String> = spec
+            .get("source_columns")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let resolved = Self::resolve(pinned, &source_columns);
+        (!resolved.is_empty()).then_some(resolved)
+    }
+
+    /// The authoritative mapping, ordered by index: the assignments the API
+    /// pinned, or, on a spec stored before pinning, each declared source column
+    /// at its position, which is the index its readings were stored under.
+    /// Both crates read an unpinned spec through here so that neither invents
+    /// an index the other would not.
+    #[must_use]
+    pub fn resolve(pinned: Vec<Self>, source_columns: &[String]) -> Vec<Self> {
+        let mut resolved = if pinned.is_empty() {
+            source_columns
+                .iter()
+                .enumerate()
+                .map(|(i, column)| Self {
+                    column: column.clone(),
+                    index: i16::try_from(i).unwrap_or(i16::MAX),
+                    retired: false,
+                })
+                .collect()
         } else {
-            Some(assignments)
-        }
+            pinned
+        };
+        resolved.sort_by_key(|a| a.index);
+        resolved
     }
 }
 
@@ -227,16 +255,137 @@ mod tests {
     }
 
     #[test]
-    fn metadata_without_pinned_assignments_yields_none() {
+    fn metadata_without_a_replicate_spec_yields_none() {
         assert!(ColumnAssignment::from_metadata(&serde_json::json!({})).is_none());
-        let unpinned = serde_json::json!({
-            "replicates": {"source_columns": ["a", "b"]},
-        });
-        assert!(ColumnAssignment::from_metadata(&unpinned).is_none());
-        let empty = serde_json::json!({
-            "replicates": {"source_columns": ["a", "b"], "assignments": []},
-        });
-        assert!(ColumnAssignment::from_metadata(&empty).is_none());
+        let no_columns = serde_json::json!({ "replicates": {"source_columns": []} });
+        assert!(ColumnAssignment::from_metadata(&no_columns).is_none());
+    }
+
+    /// An unpinned spec means the same thing on both sides of the wire: each
+    /// declared column at its position, which is what the readings registered
+    /// before pinning carry. The API resolves the metadata it stores the same
+    /// way, so neither crate can index a value the other would index
+    /// differently.
+    #[test]
+    fn an_unpinned_spec_resolves_to_column_positions() {
+        for spec in [
+            serde_json::json!({"source_columns": ["DOC_rep_1", "DOC_rep_2", "DOC_rep_3"]}),
+            serde_json::json!({
+                "source_columns": ["DOC_rep_1", "DOC_rep_2", "DOC_rep_3"],
+                "assignments": [],
+            }),
+        ] {
+            let metadata = serde_json::json!({ "replicates": spec });
+            let assignments = ColumnAssignment::from_metadata(&metadata).unwrap();
+            assert_eq!(
+                assignments,
+                vec![
+                    ColumnAssignment {
+                        column: "DOC_rep_1".into(),
+                        index: 0,
+                        retired: false,
+                    },
+                    ColumnAssignment {
+                        column: "DOC_rep_2".into(),
+                        index: 1,
+                        retired: false,
+                    },
+                    ColumnAssignment {
+                        column: "DOC_rep_3".into(),
+                        index: 2,
+                        retired: false,
+                    },
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn pinned_assignments_win_over_column_order() {
+        let pinned = vec![
+            ColumnAssignment {
+                column: "DOC_rep_2".into(),
+                index: 1,
+                retired: false,
+            },
+            ColumnAssignment {
+                column: "DOC_rep_1".into(),
+                index: 0,
+                retired: false,
+            },
+        ];
+        let resolved = ColumnAssignment::resolve(
+            pinned,
+            &["DOC_rep_1".to_string(), "DOC_rep_2".to_string()],
+        );
+        assert_eq!(resolved[0].column, "DOC_rep_1");
+        assert_eq!(resolved[1].index, 1);
+    }
+
+    /// A column the source stopped sending keeps its index, and the index stays out of use. The
+    /// API pins that state; a client that dropped it, or that renumbered around the gap, would
+    /// store the surviving columns' readings under indexes the store already gave to others.
+    #[test]
+    fn a_retired_column_keeps_its_index_and_the_gap_it_leaves() {
+        let metadata = serde_json::json!({ "replicates": {
+            "source_columns": ["DOC_rep_A", "DOC_rep_C"],
+            "assignments": [
+                { "column": "DOC_rep_C", "index": 2 },
+                { "column": "DOC_rep_A", "index": 0 },
+                { "column": "DOC_rep_B", "index": 1, "retired": true },
+            ],
+        }});
+        let assignments = ColumnAssignment::from_metadata(&metadata).unwrap();
+        assert_eq!(
+            assignments,
+            vec![
+                ColumnAssignment {
+                    column: "DOC_rep_A".into(),
+                    index: 0,
+                    retired: false,
+                },
+                ColumnAssignment {
+                    column: "DOC_rep_B".into(),
+                    index: 1,
+                    retired: true,
+                },
+                ColumnAssignment {
+                    column: "DOC_rep_C".into(),
+                    index: 2,
+                    retired: false,
+                },
+            ],
+            "the retired column is kept, in its place, and nothing is renumbered over its index"
+        );
+    }
+
+    /// The declared columns are not the mapping when the API has pinned one: a spec whose
+    /// `source_columns` disagree with its pinned indexes resolves to the pinned indexes, so the
+    /// two crates cannot land on different positions for the same column.
+    #[test]
+    fn pinning_beats_the_declared_column_list() {
+        let metadata = serde_json::json!({ "replicates": {
+            "source_columns": ["DOC_rep_B", "DOC_rep_A"],
+            "assignments": [
+                { "column": "DOC_rep_A", "index": 0 },
+                { "column": "DOC_rep_B", "index": 1 },
+            ],
+        }});
+        let assignments = ColumnAssignment::from_metadata(&metadata).unwrap();
+        assert_eq!(
+            assignments.iter().map(|a| a.index).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert_eq!(assignments[0].column, "DOC_rep_A");
+    }
+
+    /// A family that declares nothing and has nothing pinned is not a mapping of zero columns; it
+    /// is no mapping, and a caller must not read it as "index every column at 0".
+    #[test]
+    fn an_empty_spec_resolves_to_no_mapping() {
+        let metadata = serde_json::json!({ "replicates": { "source_columns": [] } });
+        assert!(ColumnAssignment::from_metadata(&metadata).is_none());
+        assert!(ColumnAssignment::resolve(Vec::new(), &[]).is_empty());
     }
 
     #[test]
