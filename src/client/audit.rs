@@ -243,6 +243,7 @@ mod tests {
             intercept: 0.0,
             r_squared: None,
             name: None,
+            fitted_on: None,
         }
     }
 

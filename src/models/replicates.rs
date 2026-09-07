@@ -85,6 +85,9 @@ pub struct StandardCurveUpsert {
     pub r_squared: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The date the source fitted the curve, which is how the lab identifies one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fitted_on: Option<chrono::NaiveDate>,
 }
 
 /// One instrument from a source's own register, to introduce into river-data.
@@ -245,10 +248,12 @@ mod tests {
             intercept: 0.0,
             r_squared: None,
             name: Some("DOC corr 2021-01-28".into()),
+            fitted_on: chrono::NaiveDate::from_ymd_opt(2021, 1, 28),
         };
         let json = serde_json::to_value(&up).unwrap();
         assert_eq!(json["source_key"], "standard_curves:3");
         assert_eq!(json["instrument_label"], "DOC corr");
+        assert_eq!(json["fitted_on"], "2021-01-28");
         assert!(json.get("r_squared").is_none());
     }
 }
