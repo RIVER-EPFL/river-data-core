@@ -33,8 +33,12 @@ pub struct IngestOutcome {
     /// reading or caps the stream cursor, so nothing is re-sent. Kept on the
     /// wire for older API images and reported as received, never acted on.
     pub held: u64,
-    /// Windowed diff: stored rows whose source value changed and were corrected in place.
+    /// Windowed diff: stored keys the source has moved since river-data stored them. Nothing is
+    /// written for them; `proposed` says how many are waiting for a person to accept or reject.
     pub changed: u64,
+    /// Windowed diff: changed keys recorded as proposals this pass, each awaiting a decision.
+    /// Absent on an API older than the proposal queue, which reads as 0.
+    pub proposed: u64,
     /// Windowed diff: stored rows absent from the claimed window, stamped withdrawn.
     pub withdrawn: u64,
     /// Windowed diff: stored rows the payload re-sent unchanged (proof the pass looked).
@@ -58,6 +62,7 @@ pub struct BatchedIngest {
     /// Always 0; see [`IngestOutcome::held`].
     pub held: u64,
     pub changed: u64,
+    pub proposed: u64,
     pub withdrawn: u64,
     pub unchanged: u64,
     pub failed_batches: usize,
@@ -276,6 +281,8 @@ impl RiverDataClient {
             #[serde(default)]
             changed: u64,
             #[serde(default)]
+            proposed: u64,
+            #[serde(default)]
             withdrawn: u64,
             #[serde(default)]
             unchanged: u64,
@@ -327,6 +334,7 @@ impl RiverDataClient {
             skipped_reasons: result.skipped_reasons,
             held: result.held,
             changed: result.changed,
+            proposed: result.proposed,
             withdrawn: result.withdrawn,
             unchanged: result.unchanged,
         })
@@ -404,6 +412,7 @@ impl RiverDataClient {
                     result.skipped_reasons.extend(outcome.skipped_reasons);
                     result.held += outcome.held;
                     result.changed += outcome.changed;
+                    result.proposed += outcome.proposed;
                     result.withdrawn += outcome.withdrawn;
                     result.unchanged += outcome.unchanged;
                 }
@@ -443,6 +452,7 @@ impl RiverDataClient {
                     result.skipped_reasons.extend(outcome.skipped_reasons);
                     result.held += outcome.held;
                     result.changed += outcome.changed;
+                    result.proposed += outcome.proposed;
                     result.withdrawn += outcome.withdrawn;
                     result.unchanged += outcome.unchanged;
                     sent += chunk.len();

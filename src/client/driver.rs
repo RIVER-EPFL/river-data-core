@@ -436,14 +436,16 @@ impl SyncDriver {
             outcome.readings_skipped += batch.skipped;
             outcome.readings_held += batch.held;
             if batch.changed > 0 || batch.withdrawn > 0 {
+                // A changed key is a proposal, not a correction: the stored value stands until a
+                // person accepts it, so the line says what is waiting rather than what moved.
                 let line = format!(
-                    "{}: converged on source ({} corrected, {} withdrawn)",
-                    sr.source_key, batch.changed, batch.withdrawn
+                    "{}: {} changed at source ({} awaiting a decision), {} withdrawn",
+                    sr.source_key, batch.changed, batch.proposed, batch.withdrawn
                 );
                 if outcome.log.len() < MAX_LOG_LINES {
                     outcome.log.push(line);
                 } else {
-                    tracing::info!(source_key = %sr.source_key, changed = batch.changed, withdrawn = batch.withdrawn, "Windowed convergence");
+                    tracing::info!(source_key = %sr.source_key, changed = batch.changed, proposed = batch.proposed, withdrawn = batch.withdrawn, "Windowed convergence");
                 }
             }
             if batch.failed_batches > 0 {
