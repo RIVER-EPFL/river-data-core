@@ -254,7 +254,7 @@ materialises `samples` rows.
 
 A source with its own instrument register introduces those instruments before anything else:
 return them from `discover_instruments` (`SensorUpsert`: `source_key`, `name`, `serial_number`,
-`manufacturer`, `model`, `notes`, `is_lab_instrument`, `metadata`), idempotent per
+`manufacturer`, `model`, `notes`, `is_lab_instrument`, `data_frequency`, `metadata`), idempotent per
 `(source_system, source_key)`. The driver posts each to `POST /api/sensors/register` and hands the
 resulting `SensorMapping`s to `apply_instrument_mappings`.
 
@@ -269,8 +269,9 @@ needs none of this. An instrument the API already holds under the key is returne
 
 A source with lab calibration curves registers them before its streams: return them from
 `discover_standard_curves` (`StandardCurveUpsert`: `source_key`, `instrument_label`, `slope`,
-`intercept`, `r_squared`, `name`), idempotent per `(source_system, source_key)`. The driver
-posts each to `POST /api/standard_curves/register` and hands the resulting `CurveMapping`s
+`intercept`, `r_squared`, `name`, `fitted_on`, `notes`), idempotent per
+`(source_system, source_key)`. The driver posts each to `POST /api/standard_curves/register`
+and hands the resulting `CurveMapping`s
 (curve id, the lab instrument the API found or created for the label, whether the curve was
 superseded) to `apply_curve_mappings`. Readings then name the curve by `standard_curve_id`, and
 the descriptor of any stream carrying such claims names the curve's `sensor_id`.
@@ -400,6 +401,7 @@ async fn fetch_status_events(
             events: vec![IngestStatusEvent {
                 time: Utc::now(),
                 value: format!("rows={} undecodable={undecodable}", rows.len()),
+                sensor_id: None,
             }],
         })
         .collect())

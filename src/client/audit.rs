@@ -145,8 +145,10 @@ pub fn compare(
         }
     }
 
-    let source_curve_keys: BTreeSet<&str> =
-        source_curves.iter().map(|c| c.source_key.as_str()).collect();
+    let source_curve_keys: BTreeSet<&str> = source_curves
+        .iter()
+        .map(|c| c.source_key.as_str())
+        .collect();
     let curves = match registered_curve_keys {
         None => CurveAudit {
             at_source: source_curve_keys.len(),
@@ -227,7 +229,7 @@ mod tests {
             source_path: Some(format!("cnet/{group}/{key}")),
             metadata: serde_json::json!({}),
             site_parameter_id: paired.then(Uuid::new_v4),
-            measurement_type: Some("spot".to_string()),
+            measurement_type: Some(crate::models::MeasurementType::Spot.to_string()),
             is_active: true,
             last_data_time: None,
             last_window_digest: None,
@@ -244,6 +246,7 @@ mod tests {
             r_squared: None,
             name: None,
             fitted_on: None,
+            notes: None,
         }
     }
 
@@ -265,8 +268,14 @@ mod tests {
     fn test_compare_matches_a_source_that_is_fully_registered() {
         let report = compare(
             "cnet",
-            &inventory(vec![candidate("VAD:pH", "VAD"), candidate("VAD:DOC", "VAD")]),
-            &[stream("VAD:pH", "VAD", true), stream("VAD:DOC", "VAD", true)],
+            &inventory(vec![
+                candidate("VAD:pH", "VAD"),
+                candidate("VAD:DOC", "VAD"),
+            ]),
+            &[
+                stream("VAD:pH", "VAD", true),
+                stream("VAD:DOC", "VAD", true),
+            ],
             &[],
             Some(&[]),
         );

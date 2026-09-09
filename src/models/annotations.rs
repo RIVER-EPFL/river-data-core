@@ -12,6 +12,7 @@ use uuid::Uuid;
 /// re-asserted on a later cycle once the stream is paired.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct AnnotationUpsert {
     pub source_key: String,
     pub stream_id: Uuid,
@@ -46,6 +47,7 @@ pub struct AnnotationMapping {
 /// later cycle, once pairing has created the site.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct NoteUpsert {
     pub source_key: String,
     pub site_name: String,

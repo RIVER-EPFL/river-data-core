@@ -118,6 +118,7 @@ impl SourceBackend for TableBackend {
                 events: vec![IngestStatusEvent {
                     time: Utc::now(),
                     value: format!("rows={} undecodable={undecodable}", rows.len()),
+                    sensor_id: None,
                 }],
             })
             .collect())

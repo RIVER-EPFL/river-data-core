@@ -88,6 +88,7 @@ impl ColumnAssignment {
 /// group's readings so the API can compare server-side.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct GroupAudit {
     pub time: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -120,6 +121,9 @@ pub struct StandardCurveUpsert {
     /// The date the source fitted the curve, which is how the lab identifies one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fitted_on: Option<chrono::NaiveDate>,
+    /// Whatever the source records about the fit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 /// One instrument from a source's own register, to introduce into river-data.
@@ -130,6 +134,7 @@ pub struct StandardCurveUpsert {
 /// API already holds under that key is never rewritten.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct SensorUpsert {
     /// The instrument's identity within the source, e.g. "sensor_inventory:62".
     pub source_key: String,
@@ -146,6 +151,10 @@ pub struct SensorUpsert {
     pub notes: Option<String>,
     /// True for an instrument that corrects a grab in the lab rather than standing in a river.
     pub is_lab_instrument: bool,
+    /// The cadence the instrument logs at ('high' | 'low'), read as a declaration when a stream
+    /// classifies its readings. None leaves the API's default of 'high'.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_frequency: Option<String>,
     /// Whatever the source knows that river-data has no column for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
@@ -210,6 +219,7 @@ mod tests {
             r_squared: None,
             name: Some("DOC corr 2021-01-28".into()),
             fitted_on: chrono::NaiveDate::from_ymd_opt(2021, 1, 28),
+            notes: None,
         };
         let back: StandardCurveUpsert =
             serde_json::from_value(serde_json::to_value(&curve).unwrap()).unwrap();
@@ -224,6 +234,7 @@ mod tests {
             model: Some("Cyclops-7".into()),
             notes: None,
             is_lab_instrument: false,
+            data_frequency: None,
             metadata: None,
         };
         let back: SensorUpsert =
@@ -268,6 +279,7 @@ mod tests {
             model: Some("Cyclops-7".into()),
             notes: None,
             is_lab_instrument: false,
+            data_frequency: None,
             metadata: None,
         };
         let json = serde_json::to_value(&up).unwrap();
@@ -469,6 +481,7 @@ mod tests {
             r_squared: None,
             name: Some("DOC corr 2021-01-28".into()),
             fitted_on: chrono::NaiveDate::from_ymd_opt(2021, 1, 28),
+            notes: None,
         };
         let json = serde_json::to_value(&up).unwrap();
         assert_eq!(json["source_key"], "standard_curves:3");

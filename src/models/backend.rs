@@ -42,6 +42,7 @@ pub struct StreamFetchRequest {
 /// without a window the request is a bare append, exactly the old semantics.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct SourceWindow {
     pub from: DateTime<Utc>,
     pub to: DateTime<Utc>,

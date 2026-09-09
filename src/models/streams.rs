@@ -55,6 +55,7 @@ pub struct RegisterStreamRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct IngestReading {
     pub time: chrono::DateTime<chrono::Utc>,
     pub raw_value: f64,
@@ -97,9 +98,14 @@ fn is_zero(v: &i16) -> bool {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct IngestStatusEvent {
     pub time: chrono::DateTime<chrono::Utc>,
     pub value: String,
+    /// The instrument the status describes, when the source knows it. None leaves the event
+    /// attributed to the stream alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensor_id: Option<Uuid>,
 }
 
 #[cfg(test)]
@@ -157,6 +163,7 @@ mod tests {
         let e = IngestStatusEvent {
             time: chrono::Utc::now(),
             value: "unreachable".to_string(),
+            sensor_id: None,
         };
         let back: IngestStatusEvent =
             serde_json::from_value(serde_json::to_value(&e).unwrap()).unwrap();
