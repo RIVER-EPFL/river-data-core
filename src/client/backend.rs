@@ -1,7 +1,7 @@
 use crate::models::{
-    ColumnAssignment, CurveMapping, DataStream, NoteMapping, NoteUpsert, SensorMapping,
-    SensorUpsert, SourceInventory, StandardCurveUpsert,
-    StreamDescriptor, StreamFetchRequest, StreamReadings, StreamStatusEvents,
+    ColumnAssignment, CurveMapping, DataStream, NoteMapping, NoteUpsert, SensorUpsert,
+    SourceInventory, StandardCurveUpsert, StreamDescriptor, StreamFetchRequest, StreamReadings,
+    StreamStatusEvents,
 };
 
 pub type BackendError = Box<dyn std::error::Error + Send + Sync>;
@@ -35,14 +35,6 @@ pub trait SourceBackend: Send + Sync + 'static {
     /// own to be minted from. Registered before curves and streams. Default: none.
     async fn discover_instruments(&self) -> Result<Vec<SensorUpsert>, BackendError> {
         Ok(Vec::new())
-    }
-
-    /// Receives the API-side identities the discovered instruments resolved to. Default: ignored.
-    async fn apply_instrument_mappings(
-        &self,
-        _mappings: &[SensorMapping],
-    ) -> Result<(), BackendError> {
-        Ok(())
     }
 
     /// Source-authored site notes. Registered after streams, so a station's

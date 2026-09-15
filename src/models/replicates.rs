@@ -160,17 +160,6 @@ pub struct SensorUpsert {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// The API-side identity a registered instrument resolved to.
-#[derive(Debug, Clone)]
-pub struct SensorMapping {
-    pub source_key: String,
-    pub id: Uuid,
-    /// False when the API already held an instrument under this key.
-    pub created: bool,
-    /// The instrument already holding the offered serial, when the API declined to claim it.
-    pub serial_claimed_by: Option<Uuid>,
-}
-
 /// The API-side identity a registered curve resolved to.
 #[derive(Debug, Clone)]
 pub struct CurveMapping {
@@ -397,10 +386,8 @@ mod tests {
                 retired: false,
             },
         ];
-        let resolved = ColumnAssignment::resolve(
-            pinned,
-            &["DOC_rep_1".to_string(), "DOC_rep_2".to_string()],
-        );
+        let resolved =
+            ColumnAssignment::resolve(pinned, &["DOC_rep_1".to_string(), "DOC_rep_2".to_string()]);
         assert_eq!(resolved[0].column, "DOC_rep_1");
         assert_eq!(resolved[1].index, 1);
     }

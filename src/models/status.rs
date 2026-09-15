@@ -35,7 +35,7 @@ impl ServiceStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.iter().find(|v| v.as_str() == s).copied()
     }
 }
@@ -103,7 +103,7 @@ impl SyncEventType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.iter().find(|v| v.as_str() == s).copied()
     }
 }
@@ -137,7 +137,7 @@ impl SyncEventStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.iter().find(|v| v.as_str() == s).copied()
     }
 
@@ -150,5 +150,32 @@ impl SyncEventStatus {
 
     pub fn is_success(&self) -> bool {
         matches!(self, Self::Completed | Self::Partial)
+    }
+}
+
+impl std::str::FromStr for ServiceStatus {
+    type Err = super::UnknownValue;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+            .ok_or_else(|| super::UnknownValue::new(s, Self::ALL.iter().map(Self::as_str)))
+    }
+}
+
+impl std::str::FromStr for SyncEventType {
+    type Err = super::UnknownValue;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+            .ok_or_else(|| super::UnknownValue::new(s, Self::ALL.iter().map(Self::as_str)))
+    }
+}
+
+impl std::str::FromStr for SyncEventStatus {
+    type Err = super::UnknownValue;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+            .ok_or_else(|| super::UnknownValue::new(s, Self::ALL.iter().map(Self::as_str)))
     }
 }

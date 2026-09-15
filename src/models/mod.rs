@@ -6,6 +6,7 @@ mod protocol;
 mod replicates;
 mod status;
 mod streams;
+mod vocabulary;
 
 pub use annotations::{AnnotationMapping, AnnotationUpsert, NoteMapping, NoteUpsert};
 pub use backend::{
@@ -19,11 +20,11 @@ pub use protocol::{
     PendingCommand, SyncEventCreate, SyncEventRef, SyncEventUpdate, SyncResult, SyncTrigger,
 };
 pub use replicates::{
-    ColumnAssignment, CurveMapping, GroupAudit, ReplicateSpec, SensorMapping, SensorUpsert,
-    StandardCurveUpsert,
+    ColumnAssignment, CurveMapping, GroupAudit, ReplicateSpec, SensorUpsert, StandardCurveUpsert,
 };
 pub use status::{CommandStatus, ServiceStatus, SyncEventStatus, SyncEventType};
 pub use streams::{DataStream, IngestReading, IngestStatusEvent, RegisterStreamRequest};
+pub use vocabulary::UnknownValue;
 
 #[cfg(test)]
 mod tests {

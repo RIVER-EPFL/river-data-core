@@ -181,11 +181,6 @@ async fn harness(backend: FakeBackend, streams: Vec<serde_json::Value>) -> Harne
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"inserted": 1})))
         .mount(&server)
         .await;
-    Mock::given(method("POST"))
-        .and(path("/api/actions/refresh_aggregates"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
-        .mount(&server)
-        .await;
 
     let api = RiverDataClient::new(&server.uri(), "tok").unwrap();
     let driver = SyncDriver::new(Box::new(backend), api, &test_config());
@@ -332,11 +327,6 @@ async fn test_ingest_stops_at_first_failed_batch() {
         })
         .mount(&h.server)
         .await;
-    Mock::given(method("POST"))
-        .and(path("/api/actions/refresh_aggregates"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
-        .mount(&h.server)
-        .await;
 
     let result = h.driver.sync(false).await.unwrap();
     assert_eq!(result.readings_synced, 1000);
@@ -418,50 +408,12 @@ async fn test_discovery_retried_after_failed_registration() {
         })
         .mount(&h.server)
         .await;
-    Mock::given(method("POST"))
-        .and(path("/api/actions/refresh_aggregates"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
-        .mount(&h.server)
-        .await;
 
     // Registration fails on both cycles; the failed pass must not latch the
     // discovery flag, so the second cycle tries again.
     h.driver.sync(false).await.unwrap();
     h.driver.sync(false).await.unwrap();
     assert_eq!(count(&h.server, "POST", "/api/streams/register").await, 2);
-}
-
-#[tokio::test]
-async fn test_aggregates_skipped_when_no_readings() {
-    let h = harness(
-        FakeBackend::default(),
-        vec![stream_json(Uuid::new_v4(), "s1", None)],
-    )
-    .await;
-
-    h.driver.sync(false).await.unwrap();
-    assert_eq!(
-        count(&h.server, "POST", "/api/actions/refresh_aggregates").await,
-        0
-    );
-}
-
-#[tokio::test]
-async fn test_aggregates_refreshed_after_readings() {
-    let h = harness(
-        FakeBackend {
-            readings_per_stream: 5,
-            ..Default::default()
-        },
-        vec![stream_json(Uuid::new_v4(), "s1", None)],
-    )
-    .await;
-
-    h.driver.sync(false).await.unwrap();
-    assert_eq!(
-        count(&h.server, "POST", "/api/actions/refresh_aggregates").await,
-        1
-    );
 }
 
 // Scenario: registration returns the pinned mapping, and a listed stream's
@@ -571,11 +523,6 @@ async fn test_windowed_payload_sent_as_single_request() {
         })
         .mount(&h.server)
         .await;
-    Mock::given(method("POST"))
-        .and(path("/api/actions/refresh_aggregates"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
-        .mount(&h.server)
-        .await;
 
     let result = h.driver.sync(false).await.unwrap();
     assert_eq!(result.readings_synced, 1500);
@@ -651,11 +598,6 @@ async fn test_a_non_zero_held_count_is_reported_and_not_acted_on() {
             let n = body["readings"].as_array().map(|a| a.len()).unwrap_or(0);
             ResponseTemplate::new(200).set_body_json(json!({"inserted": n, "held": 3}))
         })
-        .mount(&h.server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/api/actions/refresh_aggregates"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .mount(&h.server)
         .await;
 

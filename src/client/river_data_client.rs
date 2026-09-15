@@ -5,10 +5,8 @@ use uuid::Uuid;
 use crate::error::RiverDataClientError;
 use crate::models::{
     AnnotationMapping, AnnotationUpsert, CommandStatus, CurveMapping, DataStream, GroupAudit,
-    IngestReading, IngestStatusEvent, NoteMapping, NoteUpsert, RegisterStreamRequest,
-    SensorMapping, SensorUpsert,
-    StandardCurveUpsert, SyncEventCreate,
-    SyncEventRef, SyncEventUpdate,
+    IngestReading, IngestStatusEvent, NoteMapping, NoteUpsert, RegisterStreamRequest, SensorUpsert,
+    StandardCurveUpsert, SyncEventCreate, SyncEventRef, SyncEventUpdate,
 };
 
 pub struct RiverDataClient {
@@ -473,47 +471,40 @@ impl RiverDataClient {
     // Instruments
     // ========================================================================
 
-    /// Register a source's own instruments; idempotent per (source_system,
-    /// source_key). Returns the API-side identity of every instrument
-    /// registered, including whether it was already present and whether its
-    /// serial was claimed.
-    pub async fn register_sensors(
+    /// Offer the source's own instrument register to the API, which stores it as proposals a
+    /// pairing plan admits. Nothing is minted here: an instrument exists once a plan an operator
+    /// validated creates it (Q134), so a register row travels and waits.
+    pub async fn propose_instruments(
         &self,
         source_system: &str,
-        sensors: &[SensorUpsert],
-    ) -> Result<Vec<SensorMapping>, RiverDataClientError> {
+        instruments: &[SensorUpsert],
+    ) -> Result<usize, RiverDataClientError> {
+        if instruments.is_empty() {
+            return Ok(0);
+        }
         #[derive(serde::Deserialize)]
-        struct SensorResponse {
-            id: Uuid,
+        struct ProposalsResponse {
             #[serde(default)]
-            created: bool,
-            #[serde(default)]
-            serial_claimed_by: Option<Uuid>,
+            stored: usize,
         }
-
-        let mut mappings = Vec::with_capacity(sensors.len());
-        for sensor in sensors {
-            let mut body = serde_json::to_value(sensor)
-                .map_err(|e| RiverDataClientError::Api(format!("serialize instrument: {e}")))?;
-            body["source_system"] = serde_json::Value::String(source_system.to_string());
-            let resp = self
-                .send_authorized(
-                    self.http_client.post(self.url("/sensors/register")).json(&body),
-                    "register_sensor",
-                )
-                .await?;
-            let resp = self.check_response(resp).await?;
-            let parsed: SensorResponse = resp.json().await.map_err(|e| {
-                RiverDataClientError::Api(format!("parse instrument response: {e}"))
-            })?;
-            mappings.push(SensorMapping {
-                source_key: sensor.source_key.clone(),
-                id: parsed.id,
-                created: parsed.created,
-                serial_claimed_by: parsed.serial_claimed_by,
-            });
-        }
-        Ok(mappings)
+        let body = serde_json::json!({
+            "source_system": source_system,
+            "instruments": instruments,
+        });
+        let resp = self
+            .send_authorized(
+                self.http_client
+                    .post(self.url("/sensors/proposals"))
+                    .json(&body),
+                "propose_instruments",
+            )
+            .await?;
+        let resp = self.check_response(resp).await?;
+        let parsed: ProposalsResponse = resp
+            .json()
+            .await
+            .map_err(|e| RiverDataClientError::Api(format!("propose instruments: {e}")))?;
+        Ok(parsed.stored)
     }
 
     // ========================================================================
@@ -672,20 +663,6 @@ impl RiverDataClient {
     // ========================================================================
     // Actions
     // ========================================================================
-
-    pub async fn refresh_aggregates(&self, full: bool) -> Result<(), RiverDataClientError> {
-        let body = serde_json::json!({ "full": full });
-        let resp = self
-            .send_authorized(
-                self.http_client
-                    .post(self.url("/actions/refresh_aggregates"))
-                    .json(&body),
-                "refresh_aggregates",
-            )
-            .await?;
-        self.check_response(resp).await?;
-        Ok(())
-    }
 
     // ========================================================================
     // Command Updates
@@ -847,6 +824,72 @@ mod tests {
             text.contains("only accepted on a stream declared spot"),
             "the server's own words must survive: {text}"
         );
+    }
+
+    /// Scenario: a service whose credential declares another source system offers its instrument
+    /// register, and the API refuses it with 403 and a JSON error body.
+    ///
+    /// Expected behaviour: the refusal is an error carrying the server's words, not a count of
+    /// zero. A zero is what an all-already-admitted cycle reports, so a refusal read as one is a
+    /// cycle recorded Completed with nothing registered.
+    #[tokio::test]
+    async fn a_refused_instrument_register_is_an_error_not_a_count_of_zero() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/api/sensors/proposals"))
+            .respond_with(wiremock::ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "error": "this service is enrolled for metalp and cannot register rows as cnet"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = RiverDataClient::new(&server.uri(), "tok").unwrap();
+        let err = client
+            .propose_instruments("cnet", &[instrument_upsert()])
+            .await
+            .expect_err("a 403 is an error, not Ok(0)");
+        let text = err.to_string();
+        assert!(text.contains("403"), "{text}");
+        assert!(
+            text.contains("enrolled for metalp"),
+            "the server's own words must survive: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_accepted_instrument_register_returns_what_was_stored() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/api/sensors/proposals"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "stored": 3, "already_admitted": 1 })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = RiverDataClient::new(&server.uri(), "tok").unwrap();
+        assert_eq!(
+            client
+                .propose_instruments("cnet", &[instrument_upsert()])
+                .await
+                .unwrap(),
+            3
+        );
+    }
+
+    fn instrument_upsert() -> crate::models::SensorUpsert {
+        crate::models::SensorUpsert {
+            source_key: "sensor_inventory:62".to_string(),
+            name: "DOC corr".to_string(),
+            serial_number: None,
+            manufacturer: None,
+            model: None,
+            notes: None,
+            is_lab_instrument: true,
+            data_frequency: Some("low".to_string()),
+            metadata: None,
+        }
     }
 
     #[tokio::test]

@@ -261,6 +261,7 @@ mod tests {
             candidates,
             declined: Vec::new(),
             groups,
+            instruments: Vec::new(),
         }
     }
 
@@ -394,6 +395,7 @@ mod tests {
             }],
             declined: Vec::new(),
             groups: Vec::new(),
+            instruments: Vec::new(),
         };
         let mut bare = stream("bare", "", true);
         bare.source_path = None;

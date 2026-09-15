@@ -52,6 +52,22 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     h
 }
 
+/// Where one stream's fetch starts. A reconciled backend re-reads its source's full content every
+/// cycle: the cursor is what would truncate the payload below the stored maximum and turn a
+/// completeness window into a mass withdrawal, so it is never applied there. That is also what
+/// carries a correction made to an old row at the source, which an incremental cursor would never
+/// read again and which would then wait on the weekly full re-assert.
+fn fetch_since(
+    last_data_time: Option<chrono::DateTime<chrono::Utc>>,
+    full: bool,
+    reconciled: bool,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    if full || reconciled {
+        return None;
+    }
+    last_data_time
+}
+
 /// Digest of a windowed payload's source-asserted content: the span it covers, the rows sorted by
 /// (time, replicate_index), the audit expectations and the riding annotations. Server curation
 /// never enters it. None for unwindowed payloads and for content that cannot serialize (which
@@ -109,9 +125,12 @@ impl SyncDriver {
         }
     }
 
-    /// Register the backend's own instruments and hand the resulting mappings
-    /// back. Runs before curves and stream registration: an instrument a curve
-    /// or a descriptor names has to exist first.
+    /// Offer the backend's own instrument register to the API, which holds it as proposals for a
+    /// pairing plan to admit.
+    ///
+    /// Nothing is created by a sync: an instrument exists once a plan an operator validated creates
+    /// it (Q134). The register still has to travel, because it is the only record of which probe
+    /// carried which serial and when it was installed, and it goes with the portal otherwise.
     async fn sync_instruments(&self, result: &mut SyncResult) {
         let sensors = match self.backend.discover_instruments().await {
             Ok(s) => s,
@@ -124,30 +143,21 @@ impl SyncDriver {
         if sensors.is_empty() {
             return;
         }
-        let mappings = match self
+        let stored = match self
             .api
-            .register_sensors(self.backend.source_system(), &sensors)
+            .propose_instruments(self.backend.source_system(), &sensors)
             .await
         {
-            Ok(m) => m,
+            Ok(n) => n,
             Err(e) => {
-                tracing::warn!(error = %e, "Instrument registration failed");
-                result.errors.push(format!("Instrument registration: {e}"));
+                tracing::warn!(error = %e, "Instrument proposal failed");
+                result.errors.push(format!("Instrument proposals: {e}"));
                 return;
             }
         };
-        if let Err(e) = self.backend.apply_instrument_mappings(&mappings).await {
-            tracing::warn!(error = %e, "Applying instrument mappings failed");
-            result.errors.push(format!("Instrument mappings: {e}"));
-            return;
-        }
-        let unclaimed = mappings
-            .iter()
-            .filter(|m| m.serial_claimed_by.is_some())
-            .count();
         result.log.push(format!(
-            "Instruments: {} registered, {unclaimed} serials already held",
-            mappings.len()
+            "Instruments: {stored} of {} register rows offered to the pairing plan",
+            sensors.len()
         ));
     }
 
@@ -338,20 +348,13 @@ impl SyncDriver {
 
         self.apply_persisted_assignments(&streams).await;
 
-        // A reconciled backend re-reads its source's full content every cycle: the cursor is
-        // what would truncate the payload below the stored maximum and turn a completeness
-        // window into a mass withdrawal, so it is never applied there.
         let reconciled = self.backend.reconciled();
         let requests: Vec<StreamFetchRequest> = streams
             .iter()
             .map(|s| StreamFetchRequest {
                 stream_id: s.id,
                 source_key: s.source_key.clone(),
-                since: if full || reconciled {
-                    None
-                } else {
-                    s.last_data_time
-                },
+                since: fetch_since(s.last_data_time, full, reconciled),
             })
             .collect();
 
@@ -766,13 +769,6 @@ impl SyncService for SyncDriver {
             }
         };
 
-        if result.readings_synced > 0
-            && let Err(e) = self.api.refresh_aggregates(full).await
-        {
-            tracing::warn!(error = %e, "Aggregate refresh failed");
-            result.errors.push(format!("Aggregate refresh: {e}"));
-        }
-
         if let Some(streams) = &outcome {
             self.sync_status_events(streams, &mut result).await;
         }
@@ -821,6 +817,23 @@ mod tests {
             content_digest: None,
         });
         sr
+    }
+
+    #[test]
+    fn a_reconciled_backend_reads_from_the_source_start_on_every_cycle() {
+        let cursor = Some(t(1_000));
+        // The portals are reconciled, so an edit to a row older than the cursor is read on an
+        // ordinary cycle and does not wait for the weekly full re-assert.
+        assert_eq!(fetch_since(cursor, false, true), None);
+        assert_eq!(fetch_since(cursor, true, true), None);
+    }
+
+    #[test]
+    fn an_append_source_reads_from_its_cursor_until_a_full_pass() {
+        let cursor = Some(t(1_000));
+        assert_eq!(fetch_since(cursor, false, false), cursor);
+        assert_eq!(fetch_since(cursor, true, false), None);
+        assert_eq!(fetch_since(None, false, false), None);
     }
 
     #[test]

@@ -121,6 +121,11 @@ pub struct SourceInventory {
     /// Every group the source holds, so one with no channel at all is still named.
     #[serde(default)]
     pub groups: Vec<String>,
+    /// The source's own instrument register, where it keeps one. These are instruments no stream
+    /// mints: a portal's `sensor_inventory` is the answer to which probe, which serial, installed
+    /// when, and it goes with the portal unless it is admitted here.
+    #[serde(default)]
+    pub instruments: Vec<crate::models::SensorUpsert>,
 }
 
 /// One channel the connector carries.
@@ -163,6 +168,7 @@ impl SourceInventory {
             candidates,
             declined: Vec::new(),
             groups,
+            instruments: Vec::new(),
         }
     }
 }
