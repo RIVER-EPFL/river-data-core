@@ -251,7 +251,6 @@ mod tests {
                 portal_sd_column: Some("DOC_sd_ppb".into()),
                 curve_ref_column: Some("doc_std_curve_id".into()),
                 calc: Some("calcDOCavg".into()),
-                sd_estimator: None,
             }),
             decimal_places: Some(2),
             instrument_granularity: None,

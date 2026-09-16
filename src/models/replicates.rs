@@ -20,11 +20,6 @@ pub struct ReplicateSpec {
     pub curve_ref_column: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calc: Option<String>,
-    /// The sd divisor the source's own sd column uses ('sample' | 'population'),
-    /// when the source declares one. Never inferred; None leaves the slot's
-    /// declaration (or the audit gate) to decide.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sd_estimator: Option<String>,
 }
 
 /// One source column's pinned replicate index, as the API's register response
@@ -109,8 +104,9 @@ pub struct GroupAudit {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StandardCurveUpsert {
     pub source_key: String,
-    /// The portal curve's parameter label; the API finds-or-creates one lab
-    /// instrument per (source_system, instrument_label).
+    /// The portal curve's parameter label. The portal names no instrument for a
+    /// curve, so this is where a pairing plan suggests the attachment from; the
+    /// API holds the curve until a plan attaches it to one of its instruments.
     pub instrument_label: String,
     pub slope: f64,
     pub intercept: f64,
@@ -183,12 +179,10 @@ mod tests {
             portal_sd_column: None,
             curve_ref_column: None,
             calc: Some("calcMean".into()),
-            sd_estimator: Some("population".into()),
         };
         let back: ReplicateSpec =
             serde_json::from_value(serde_json::to_value(&spec).unwrap()).unwrap();
         assert_eq!(back.source_columns, spec.source_columns);
-        assert_eq!(back.sd_estimator.as_deref(), Some("population"));
 
         let audit = GroupAudit {
             time: Utc::now(),
@@ -242,6 +236,16 @@ mod tests {
     }
 
     #[test]
+    fn test_replicate_spec_drops_sd_estimator() {
+        let json = serde_json::json!({
+            "source_columns": ["DOC_rep_1", "DOC_rep_2"],
+            "sd_estimator": "population",
+        });
+        let spec: ReplicateSpec = serde_json::from_value(json).unwrap();
+        assert!(serde_json::to_value(&spec).unwrap().get("sd_estimator").is_none());
+    }
+
+    #[test]
     fn replicate_spec_skips_absent_fields() {
         let spec = ReplicateSpec {
             source_columns: vec!["DIC_A".into(), "DIC_B".into()],
@@ -249,7 +253,6 @@ mod tests {
             portal_sd_column: None,
             curve_ref_column: None,
             calc: Some("calcMean".into()),
-            sd_estimator: None,
         };
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["source_columns"][1], "DIC_B");

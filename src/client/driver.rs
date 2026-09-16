@@ -192,9 +192,11 @@ impl SyncDriver {
             result.errors.push(format!("Curve mappings: {e}"));
             return;
         }
-        result
-            .log
-            .push(format!("Standard curves: {} registered", mappings.len()));
+        let held = curves.len().saturating_sub(mappings.len());
+        result.log.push(format!(
+            "Standard curves: {} stored, {held} held for a pairing plan",
+            mappings.len()
+        ));
     }
 
     /// Register the backend's site notes. Runs after discovery: a note's station

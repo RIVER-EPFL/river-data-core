@@ -243,8 +243,6 @@ A stream whose readings are replicate groups (three DOC vials at one instant) de
   `GroupAudit` on `StreamReadings.audits` (`expected_mean`, `expected_sd`, `expected_n`). The
   server recomputes from the members and records a disagreement as a review hold; it never
   refuses the group.
-- `sd_estimator`: `"sample"` or `"population"` when the source declares which divisor its sd
-  column uses. Leave it `None` otherwise; the server never infers one.
 - `curve_ref_column`, `calc`: provenance of the source's calculation, stored on the stream.
 
 Set `StreamReadings.collection = true` so the server groups the payload per instant and
@@ -479,7 +477,7 @@ settings. CNET and METALP share a schema and `RshinyBackend`; NOMIS has its own 
   cells failed to decode (`PortalCell::Undecodable`). Continuous columns carry no window.
 - Replicate families come from the portal's own `parameter_calculations` catalog: members,
   mean and sd columns, the curve-reference column and the R calculation name are declared on
-  the `ReplicateSpec`, `sd_estimator` deliberately left `None`, and the pinned assignments from
+  the `ReplicateSpec`, and the pinned assignments from
   `apply_replicate_assignments` decide each member's `replicate_index`. The portal's mean and sd
   travel as `GroupAudit`s.
 - Standard curves are discovered from the portal's curve table, registered through

@@ -499,20 +499,13 @@ impl RiverDataClient {
     // ========================================================================
 
     /// Register portal standard curves; idempotent per (source_system,
-    /// source_key). Returns the API-side identity of every curve registered.
+    /// source_key). Returns the API-side identity of every curve stored; a curve
+    /// held for a pairing plan has none yet and is left out.
     pub async fn register_standard_curves(
         &self,
         source_system: &str,
         curves: &[StandardCurveUpsert],
     ) -> Result<Vec<CurveMapping>, RiverDataClientError> {
-        #[derive(serde::Deserialize)]
-        struct CurveResponse {
-            id: Uuid,
-            sensor_id: Uuid,
-            #[serde(default)]
-            superseded: bool,
-        }
-
         let mut mappings = Vec::with_capacity(curves.len());
         for curve in curves {
             let mut body = serde_json::to_value(curve)
@@ -531,12 +524,7 @@ impl RiverDataClient {
                 .json()
                 .await
                 .map_err(|e| RiverDataClientError::Api(format!("parse curve response: {e}")))?;
-            mappings.push(CurveMapping {
-                source_key: curve.source_key.clone(),
-                id: parsed.id,
-                sensor_id: parsed.sensor_id,
-                superseded: parsed.superseded,
-            });
+            mappings.extend(curve_mapping(&curve.source_key, parsed));
         }
         Ok(mappings)
     }
@@ -783,9 +771,61 @@ impl RiverDataClient {
     }
 }
 
+/// The API's answer to one curve registration. A curve no pairing plan has created yet is held,
+/// and carries no id and no instrument.
+#[derive(serde::Deserialize)]
+struct CurveResponse {
+    id: Option<Uuid>,
+    sensor_id: Option<Uuid>,
+    #[serde(default)]
+    superseded: bool,
+}
+
+/// The mapping a registration yields: a stored curve maps its source key to its id and instrument,
+/// a held one to nothing.
+fn curve_mapping(source_key: &str, response: CurveResponse) -> Option<CurveMapping> {
+    Some(CurveMapping {
+        source_key: source_key.to_string(),
+        id: response.id?,
+        sensor_id: response.sensor_id?,
+        superseded: response.superseded,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scenario: a sync registers two curves on a database where a plan has created one of them
+    /// and not yet attached the other.
+    ///
+    /// Expected behaviour: the stored curve maps, so readings naming it carry its id; the held one
+    /// maps to nothing, so its readings travel uncorrected until a plan creates it, and the other
+    /// curves in the same cycle still map.
+    #[test]
+    fn a_curve_held_for_a_plan_maps_to_nothing() {
+        let stored: CurveResponse = serde_json::from_value(serde_json::json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "sensor_id": "22222222-2222-2222-2222-222222222222",
+            "superseded": false,
+            "proposed": false,
+        }))
+        .unwrap();
+        let held: CurveResponse = serde_json::from_value(serde_json::json!({
+            "id": null,
+            "sensor_id": null,
+            "superseded": false,
+            "proposed": true,
+        }))
+        .unwrap();
+        let mapped = curve_mapping("standard_curves:1", stored).expect("a stored curve maps");
+        assert_eq!(mapped.source_key, "standard_curves:1");
+        assert_eq!(
+            mapped.id,
+            Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
+        );
+        assert!(curve_mapping("standard_curves:2", held).is_none());
+    }
 
     /// Scenario: the API refuses an ingest and says why in the body (a dishonest completeness
     /// window, a window on a non-spot stream, a project-scope rejection).
