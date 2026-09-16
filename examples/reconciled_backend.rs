@@ -64,6 +64,7 @@ impl SourceBackend for TableBackend {
             sensor_id: None,
             replicates: None,
             decimal_places: None,
+            instrument_granularity: None,
         }])
     }
 

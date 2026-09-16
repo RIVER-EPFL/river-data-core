@@ -27,6 +27,7 @@ impl SourceBackend for DemoBackend {
             sensor_id: None,
             replicates: None,
             decimal_places: None,
+            instrument_granularity: None,
         }])
     }
 

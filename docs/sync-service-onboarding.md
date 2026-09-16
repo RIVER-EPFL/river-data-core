@@ -147,6 +147,7 @@ async fn discover_streams(&self) -> Result<Vec<StreamDescriptor>, BackendError> 
         sensor_id: None,
         replicates: None,
         decimal_places: None,
+        instrument_granularity: None,
     }])
 }
 ```

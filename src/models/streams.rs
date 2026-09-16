@@ -30,6 +30,17 @@ pub struct DataStream {
     pub replicates: Option<Vec<ColumnAssignment>>,
 }
 
+/// How many instruments a source's channels stand for, declared by the connector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum InstrumentGranularity {
+    /// One instrument per parameter across every site the source reports it at (a field portal).
+    PerParameter,
+    /// One instrument per site and parameter, stationed there (a logger network).
+    PerSiteParameter,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RegisterStreamRequest {
@@ -51,6 +62,9 @@ pub struct RegisterStreamRequest {
     /// The source's decimal places for this channel (0 to 10). None declares nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decimal_places: Option<i16>,
+    /// The instrument this channel suggests at pairing. None leaves it to the API's inference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instrument_granularity: Option<InstrumentGranularity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +164,7 @@ mod tests {
             sensor_id: Some(Uuid::nil()),
             replicates: None,
             decimal_places: Some(2),
+            instrument_granularity: None,
         };
         let back: RegisterStreamRequest =
             serde_json::from_value(serde_json::to_value(&req).unwrap()).unwrap();
@@ -192,6 +207,7 @@ mod tests {
             sensor_id: None,
             replicates: None,
             decimal_places: None,
+            instrument_granularity: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["source_system"], "test_system");
@@ -213,6 +229,7 @@ mod tests {
             sensor_id: None,
             replicates: None,
             decimal_places: Some(2),
+            instrument_granularity: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["decimal_places"], 2);
@@ -237,11 +254,54 @@ mod tests {
                 sd_estimator: None,
             }),
             decimal_places: Some(2),
+            instrument_granularity: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["measurement_type"], "spot");
         assert_eq!(json["replicates"]["source_columns"][2], "DOC_rep_3");
         assert_eq!(json["replicates"]["curve_ref_column"], "doc_std_curve_id");
+    }
+
+    #[test]
+    fn test_register_stream_request_declares_instrument_granularity() {
+        let req = RegisterStreamRequest {
+            source_system: "vaisala".to_string(),
+            source_key: "1270".to_string(),
+            source_name: None,
+            source_path: None,
+            metadata: serde_json::json!({}),
+            measurement_type: None,
+            sensor_id: None,
+            replicates: None,
+            decimal_places: None,
+            instrument_granularity: Some(InstrumentGranularity::PerSiteParameter),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["instrument_granularity"], "per_site_parameter");
+        let back: RegisterStreamRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            back.instrument_granularity,
+            Some(InstrumentGranularity::PerSiteParameter)
+        );
+    }
+
+    /// A connector built against a core without the field declares nothing, which the API reads as
+    /// its own inference.
+    #[test]
+    fn test_register_stream_request_without_instrument_granularity() {
+        let req: RegisterStreamRequest = serde_json::from_value(serde_json::json!({
+            "source_system": "cnet",
+            "source_key": "VAD:DOC_rep_1",
+            "metadata": {}
+        }))
+        .unwrap();
+        assert_eq!(req.instrument_granularity, None);
+        assert!(
+            serde_json::to_value(&req)
+                .unwrap()
+                .get("instrument_granularity")
+                .is_none()
+        );
     }
 
     #[test]

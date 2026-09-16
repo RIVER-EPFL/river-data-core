@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::models::annotations::AnnotationUpsert;
 use crate::models::replicates::{GroupAudit, ReplicateSpec};
-use crate::models::streams::{IngestReading, IngestStatusEvent};
+use crate::models::streams::{IngestReading, IngestStatusEvent, InstrumentGranularity};
 
 /// Describes a data stream to register with river-data.
 #[derive(Debug, Clone)]
@@ -25,6 +25,8 @@ pub struct StreamDescriptor {
     /// the slot where none is declared, and the public API expresses served values at it. None
     /// leaves the slot undeclared, which is served unrounded.
     pub decimal_places: Option<i16>,
+    /// The instrument each channel suggests at pairing: per parameter or per site and parameter.
+    pub instrument_granularity: Option<InstrumentGranularity>,
 }
 
 /// Asks a backend for readings for one stream since a cursor.

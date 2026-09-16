@@ -23,7 +23,9 @@ pub use replicates::{
     ColumnAssignment, CurveMapping, GroupAudit, ReplicateSpec, SensorUpsert, StandardCurveUpsert,
 };
 pub use status::{CommandStatus, ServiceStatus, SyncEventStatus, SyncEventType};
-pub use streams::{DataStream, IngestReading, IngestStatusEvent, RegisterStreamRequest};
+pub use streams::{
+    DataStream, IngestReading, IngestStatusEvent, InstrumentGranularity, RegisterStreamRequest,
+};
 pub use vocabulary::UnknownValue;
 
 #[cfg(test)]

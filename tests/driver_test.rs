@@ -81,6 +81,7 @@ impl SourceBackend for FakeBackend {
             sensor_id: None,
             replicates: None,
             decimal_places: None,
+            instrument_granularity: None,
         }])
     }
 
@@ -604,7 +605,10 @@ async fn test_a_cycle_reports_what_passed_and_no_holds() {
     let result = h.driver.sync(false).await.unwrap();
     assert_eq!(result.readings_synced, 4);
     assert!(
-        result.log.iter().any(|l| l == "s1: 4 new readings, 2 unchanged"),
+        result
+            .log
+            .iter()
+            .any(|l| l == "s1: 4 new readings, 2 unchanged"),
         "{:?}",
         result.log
     );
