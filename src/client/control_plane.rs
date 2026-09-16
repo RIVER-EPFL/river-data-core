@@ -64,7 +64,7 @@ impl ControlPlaneClient {
             .await?;
 
         let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        if is_credentials_refused(status) {
             return Err(ControlPlaneError::CredentialsRevoked);
         }
         if !status.is_success() {
@@ -102,9 +102,7 @@ impl ControlPlaneClient {
         let resp = builder.json(&req).send().await?;
 
         let http_status = resp.status();
-        if http_status == reqwest::StatusCode::UNAUTHORIZED
-            || http_status == reqwest::StatusCode::FORBIDDEN
-        {
+        if is_credentials_refused(http_status) {
             return Err(ControlPlaneError::CredentialsRevoked);
         }
         if !http_status.is_success() {
@@ -123,9 +121,27 @@ impl ControlPlaneClient {
     }
 }
 
+/// Whether a control plane answer refuses the credentials themselves. A 5xx is the server failing,
+/// not a verdict on the token, and must not start re-enrollment.
+fn is_credentials_refused(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_credentials_refused_auth_statuses() {
+        assert!(is_credentials_refused(reqwest::StatusCode::UNAUTHORIZED));
+        assert!(is_credentials_refused(reqwest::StatusCode::FORBIDDEN));
+    }
+
+    #[test]
+    fn test_is_credentials_refused_server_errors_are_not_revocation() {
+        assert!(!is_credentials_refused(reqwest::StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!is_credentials_refused(reqwest::StatusCode::INTERNAL_SERVER_ERROR));
+    }
 
     #[test]
     fn test_new_creates_client() {

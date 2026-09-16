@@ -695,7 +695,9 @@ impl RiverDataClient {
                 },
                 Err(e) => last_err = Some(e),
             }
-            tracing::warn!(attempt, "create_sync_event refused; retrying");
+            if attempt < 2 {
+                tracing::warn!(attempt, "create_sync_event refused; retrying");
+            }
         }
         Err(last_err.expect("at least one attempt ran"))
     }
