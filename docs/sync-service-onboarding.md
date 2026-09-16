@@ -213,7 +213,6 @@ What the driver does with the result:
 |-------|---------|
 | `inserted` | Rows written |
 | `skipped`, `skipped_reasons` | Rows refused admission (timestamp out of window, non-finite value, unknown `measurement_type` or `calibration_id`). Dropped, not deferred: the cursor advances past them, and the count goes on the cycle's event so the loss is queryable. A stream whose every reading is refused makes the cycle `partial` |
-| `held` | Always 0. The replicate audit admits every group and records a disagreement as a review hold (ADR 0002); nothing is withheld and nothing is re-sent. The field stays on the wire for older images |
 | `changed`, `withdrawn`, `unchanged` | Windowed diff counts (below) |
 
 ## Declaring what the readings are

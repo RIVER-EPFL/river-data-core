@@ -103,7 +103,6 @@ struct ReadingsOutcome {
     streams: Vec<DataStream>,
     readings_synced: u64,
     readings_skipped: u64,
-    readings_held: u64,
     streams_with_data: usize,
     log: Vec<String>,
     errors: Vec<String>,
@@ -375,7 +374,6 @@ impl SyncDriver {
             streams,
             readings_synced: 0,
             readings_skipped: 0,
-            readings_held: 0,
             streams_with_data: 0,
             log: Vec::new(),
             errors: Vec::new(),
@@ -437,7 +435,6 @@ impl SyncDriver {
                 .await;
             outcome.readings_synced += batch.inserted;
             outcome.readings_skipped += batch.skipped;
-            outcome.readings_held += batch.held;
             if batch.changed > 0 || batch.withdrawn > 0 {
                 // A changed key is a proposal, not a correction: the stored value stands until a
                 // person accepts it, so the line says what is waiting rather than what moved.
@@ -466,8 +463,11 @@ impl SyncDriver {
             if batch.inserted > 0 {
                 outcome.streams_with_data += 1;
             }
-            if batch.inserted > 0 || batch.skipped > 0 || batch.held > 0 {
+            if batch.inserted > 0 || batch.skipped > 0 || batch.unchanged > 0 {
                 let mut line = format!("{}: {} new readings", sr.source_key, batch.inserted);
+                if batch.unchanged > 0 {
+                    line.push_str(&format!(", {} unchanged", batch.unchanged));
+                }
                 if batch.skipped > 0 {
                     line.push_str(&format!(
                         ", {} skipped ({})",
@@ -475,16 +475,10 @@ impl SyncDriver {
                         batch.skipped_reasons.join("; ")
                     ));
                 }
-                if batch.held > 0 {
-                    line.push_str(&format!(
-                        ", {} held pending audit acknowledgement",
-                        batch.held
-                    ));
-                }
                 if outcome.log.len() < MAX_LOG_LINES {
                     outcome.log.push(line);
                 } else {
-                    tracing::debug!(source_key = %sr.source_key, inserted = batch.inserted, skipped = batch.skipped, held = batch.held, "Stream ingest");
+                    tracing::debug!(source_key = %sr.source_key, inserted = batch.inserted, unchanged = batch.unchanged, skipped = batch.skipped, "Stream ingest");
                 }
             }
             // A wholly refused stream must surface as a partial cycle, which the runner derives
@@ -639,7 +633,6 @@ impl SyncDriver {
             streams: Vec::new(),
             readings_synced: 0,
             readings_skipped: 0,
-            readings_held: 0,
             streams_with_data: 0,
             log: Vec::new(),
             errors: Vec::new(),
@@ -659,7 +652,6 @@ impl SyncDriver {
             "unmatched_source_keys": missing,
             "readings_synced": outcome.readings_synced,
             "readings_skipped": outcome.readings_skipped,
-            "readings_held": outcome.readings_held,
             "errors": outcome.errors,
         }))
     }
@@ -741,13 +733,11 @@ impl SyncService for SyncDriver {
             Ok((outcome, retries)) => {
                 result.readings_synced = outcome.readings_synced;
                 result.readings_skipped = outcome.readings_skipped;
-                result.readings_held = outcome.readings_held;
                 result.log.push(format!(
-                    "Readings sync: {} readings across {} streams, {} skipped, {} held ({} retries)",
+                    "Readings sync: {} readings across {} streams, {} skipped ({} retries)",
                     outcome.readings_synced,
                     outcome.streams_with_data,
                     outcome.readings_skipped,
-                    outcome.readings_held,
                     retries
                 ));
                 result.log.extend(outcome.log);

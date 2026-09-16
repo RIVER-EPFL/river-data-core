@@ -26,11 +26,6 @@ pub struct IngestOutcome {
     pub skipped: u64,
     /// One entry per rejection kind, with its count.
     pub skipped_reasons: Vec<String>,
-    /// Always 0. The replicate audit admits every group and records a
-    /// disagreement as a review hold (ADR 0002); the API never withholds a
-    /// reading or caps the stream cursor, so nothing is re-sent. Kept on the
-    /// wire for older API images and reported as received, never acted on.
-    pub held: u64,
     /// Windowed diff: stored keys the source has moved since river-data stored them. Nothing is
     /// written for them; `proposed` says how many are waiting for a person to accept or reject.
     pub changed: u64,
@@ -57,8 +52,6 @@ pub struct BatchedIngest {
     pub inserted: u64,
     pub skipped: u64,
     pub skipped_reasons: Vec<String>,
-    /// Always 0; see [`IngestOutcome::held`].
-    pub held: u64,
     pub changed: u64,
     pub proposed: u64,
     pub withdrawn: u64,
@@ -272,9 +265,6 @@ impl RiverDataClient {
             skipped: u64,
             #[serde(default)]
             skipped_reasons: Vec<String>,
-            // Absent on an API older than replicate audits.
-            #[serde(default)]
-            held: u64,
             // Windowed diff counts; absent on an API older than reconciliation.
             #[serde(default)]
             changed: u64,
@@ -330,7 +320,6 @@ impl RiverDataClient {
             inserted: result.inserted,
             skipped: result.skipped,
             skipped_reasons: result.skipped_reasons,
-            held: result.held,
             changed: result.changed,
             proposed: result.proposed,
             withdrawn: result.withdrawn,
@@ -408,7 +397,6 @@ impl RiverDataClient {
                     result.inserted += outcome.inserted;
                     result.skipped += outcome.skipped;
                     result.skipped_reasons.extend(outcome.skipped_reasons);
-                    result.held += outcome.held;
                     result.changed += outcome.changed;
                     result.proposed += outcome.proposed;
                     result.withdrawn += outcome.withdrawn;
@@ -448,7 +436,6 @@ impl RiverDataClient {
                     result.inserted += outcome.inserted;
                     result.skipped += outcome.skipped;
                     result.skipped_reasons.extend(outcome.skipped_reasons);
-                    result.held += outcome.held;
                     result.changed += outcome.changed;
                     result.proposed += outcome.proposed;
                     result.withdrawn += outcome.withdrawn;

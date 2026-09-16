@@ -555,12 +555,11 @@ async fn test_windowed_payload_errors_without_accepted_window_echo() {
     );
 }
 
-// Scenario: the API reports a non-zero `held` on an ingest (a hypothetical image that still
-// counts audit holds). Expected behaviour: the count is carried into the result and nothing
-// else changes. No re-fetch, no second ingest, no error: the audit admits every group and the
-// cursor advances regardless (ADR 0002), so `held` is never a resend signal.
+// Scenario: an API that still sends a `held` count on an ingest, beside the counts of what passed.
+// Expected behaviour: the cycle reports what passed (new and unchanged readings) and says nothing
+// of holds, and the field is neither an error nor a resend signal.
 #[tokio::test]
-async fn test_a_non_zero_held_count_is_reported_and_not_acted_on() {
+async fn test_a_cycle_reports_what_passed_and_no_holds() {
     let fetch_calls = Arc::new(AtomicU32::new(0));
     let h = harness(
         FakeBackend {
@@ -596,14 +595,24 @@ async fn test_a_non_zero_held_count_is_reported_and_not_acted_on() {
         .respond_with(|req: &Request| {
             let body: serde_json::Value = req.body_json().unwrap();
             let n = body["readings"].as_array().map(|a| a.len()).unwrap_or(0);
-            ResponseTemplate::new(200).set_body_json(json!({"inserted": n, "held": 3}))
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"inserted": n - 2, "unchanged": 2, "held": 3}))
         })
         .mount(&h.server)
         .await;
 
     let result = h.driver.sync(false).await.unwrap();
-    assert_eq!(result.readings_synced, 6);
-    assert_eq!(result.readings_held, 3, "reported as received");
+    assert_eq!(result.readings_synced, 4);
+    assert!(
+        result.log.iter().any(|l| l == "s1: 4 new readings, 2 unchanged"),
+        "{:?}",
+        result.log
+    );
+    assert!(
+        result.log.iter().all(|l| !l.contains("held")),
+        "{:?}",
+        result.log
+    );
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     assert_eq!(fetch_calls.load(Ordering::SeqCst), 1, "no re-fetch");
     assert_eq!(
