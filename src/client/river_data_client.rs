@@ -69,8 +69,6 @@ pub struct BatchedIngest {
 pub struct IngestOptions<'a> {
     /// Update existing rows in place (sync services only).
     pub overwrite: bool,
-    /// Mark the readings as replicate collections.
-    pub collection: bool,
     /// Group audits; each request carries only the entries whose time falls
     /// inside that chunk.
     pub audits: &'a [GroupAudit],
@@ -288,9 +286,6 @@ impl RiverDataClient {
         if opts.overwrite {
             body["overwrite"] = serde_json::Value::Bool(true);
         }
-        if opts.collection {
-            body["collection"] = serde_json::Value::Bool(true);
-        }
         if !opts.audits.is_empty() {
             body["audit"] = serde_json::to_value(opts.audits)
                 .map_err(|e| RiverDataClientError::Api(format!("serialize audits: {e}")))?;
@@ -424,7 +419,6 @@ impl RiverDataClient {
                 .collect();
             let chunk_opts = IngestOptions {
                 overwrite: opts.overwrite,
-                collection: opts.collection,
                 audits: &chunk_audits,
                 window: None,
             };

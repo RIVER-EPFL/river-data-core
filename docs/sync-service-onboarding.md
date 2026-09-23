@@ -245,8 +245,8 @@ A stream whose readings are replicate groups (three DOC vials at one instant) de
   refuses the group.
 - `curve_ref_column`, `calc`: provenance of the source's calculation, stored on the stream.
 
-Set `StreamReadings.collection = true` so the server groups the payload per instant and
-materialises `samples` rows.
+The server groups a spot stream's readings per instant with nothing declared: two or more
+replicates at an instant form a `samples` row, and a lone reading is served as its own value.
 
 ### Instruments
 

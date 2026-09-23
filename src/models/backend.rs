@@ -70,8 +70,6 @@ pub struct StreamReadings {
     pub readings: Vec<IngestReading>,
     /// Portal-precomputed mean/sd per replicate group, for server-side comparison.
     pub audits: Vec<GroupAudit>,
-    /// Marks the readings as replicate collections; the API groups them per instant.
-    pub collection: bool,
     /// The completeness claim, when this fetch read the source's full content for the stream.
     pub window: Option<SourceWindow>,
     /// Source-authored annotations riding this stream's payload (e.g. the standard curve the
@@ -81,14 +79,13 @@ pub struct StreamReadings {
 }
 
 impl StreamReadings {
-    /// Plain single-series readings: no audits, not a collection, no completeness claim.
+    /// Plain single-series readings: no audits, no completeness claim.
     pub fn new(stream_id: Uuid, source_key: String, readings: Vec<IngestReading>) -> Self {
         Self {
             stream_id,
             source_key,
             readings,
             audits: Vec::new(),
-            collection: false,
             window: None,
             annotations: Vec::new(),
         }

@@ -93,7 +93,6 @@ fn window_digest(sr: &StreamReadings) -> Option<String> {
         "rows": rows,
         "audits": audits,
         "annotations": annotations,
-        "collection": sr.collection,
     });
     let bytes = serde_json::to_vec(&canonical).ok()?;
     Some(format!("{:016x}", fnv1a64(&bytes)))
@@ -428,7 +427,6 @@ impl SyncDriver {
             }
             let opts = IngestOptions {
                 overwrite,
-                collection: sr.collection,
                 audits: &sr.audits,
                 window: sr.window.as_ref(),
             };
